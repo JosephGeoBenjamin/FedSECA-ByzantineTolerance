@@ -46,53 +46,8 @@ class ClassifierNet(nn.Module):
         feat = self.backbone(x)
         out  = self.featx_proc(feat)
         out  = self.classifier(out)
-        return out
 
-
-## -----------------------------------------------------------------------------
-class ClassifierWithProjectorNet(nn.Module):
-    def __init__(self, arch, fc_layer_sizes=[512,1000],
-                    feature_dropout=0, classifier_dropout=0,
-                    feature_freeze = False, feature_bnorm = False,
-                    torch_pretrain=None,
-                    projector_sizes=[2048, 2048, 2048]
-                    ):
-        super().__init__()
-
-        clsnet = ClassifierNet(arch = arch,
-                        fc_layer_sizes    = fc_layer_sizes,
-                        feature_dropout   = feature_dropout,
-                        classifier_dropout= classifier_dropout,
-                        feature_freeze    = feature_freeze,
-                        feature_bnorm     = feature_bnorm,
-                        torch_pretrain    = torch_pretrain,
-                        return_gap_feature=False
-                        )
-        self.backbone   = clsnet.backbone
-        self.featx_proc = clsnet.featx_proc
-        self.classifier = clsnet.classifier
-        self.projector  = self.load_ProjectorNet(clsnet.feat_outsize, projector_sizes)
-
-
-    def forward(self, x):
-        feat     = self.backbone(x)
-        clsout   = self.classifier(self.featx_proc(feat))
-        projout  = self.projector(feat)
-
-        return clsout, projout
-
-    def load_ProjectorNet(self, outfeatx_size, projector_sizes):
-            # backbone_out_shape + projector_dims
-            sizes = [outfeatx_size] + list(projector_sizes)
-            layers = []
-            for i in range(len(sizes) - 2):
-                layers.append(nn.Linear(sizes[i], sizes[i + 1]))
-                layers.append(nn.BatchNorm1d(sizes[i + 1]))
-                layers.append(nn.ReLU(inplace=True))
-            layers.append(nn.Linear(sizes[-2], sizes[-1]))
-            projector = nn.Sequential(*layers)
-            return projector
-
+        return out, None
 
 
 ##==============================================================================

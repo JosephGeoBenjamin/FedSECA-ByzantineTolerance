@@ -12,7 +12,7 @@ from torch.utils.data import ConcatDataset
 
 sys.path.append(os.getcwd())
 import utilities.logUtils as lutl
-from datacode.augmentations import CifarClassifyAuguments, BarlowTransforms
+from datacode.augmentations import CifarClassifyAuguments
 from utilities.metricUtils import get_class_weights
 
 
@@ -30,7 +30,8 @@ class Cifar100_JFedDataset(torch.utils.data.Dataset):
         transforms=None,
     ):
 
-        cls_csv = csv_name if csv_name else  "cifar100_clsfy_data.csv"
+        # cls_csv = csv_name if csv_name else  "cifar100_clsfy_data.csv"
+        cls_csv = csv_name if csv_name else  "cifar100_Full_Train_data.csv"
         ssl_csv = csv_name if csv_name else  "cifar100_ssl_data.csv"
         test_csv = csv_name if csv_name else "cifar100_test_data.csv"
 

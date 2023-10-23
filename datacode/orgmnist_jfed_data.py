@@ -29,7 +29,8 @@ class OrganMnist_JFedDataset(torch.utils.data.Dataset):
         transforms=None,
     ):
 
-        cls_csv = csv_name if csv_name else  "organmnist_clsfy_data.csv"
+        # cls_csv = csv_name if csv_name else  "organmnist_clsfy_data.csv"
+        cls_csv = csv_name if csv_name else  "organmnist_Full_Train_data.csv"
         ssl_csv = csv_name if csv_name else  "organmnist_ssl_data.csv"
         test_csv = csv_name if csv_name else "organmnist_test_data.csv"
 

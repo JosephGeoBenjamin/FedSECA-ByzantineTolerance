@@ -27,8 +27,9 @@ class Isic2019_JFedDataset(torch.utils.data.Dataset):
         transforms=None,
     ):
 
-        cls_csv = csv_name if csv_name else "isic_clsfy_data.csv"
-        ssl_csv = csv_name if csv_name else "isic_ssl_data.csv"
+        # cls_csv = csv_name if csv_name else "isic_clsfy_data.csv"
+        cls_csv = csv_name if csv_name else "isic_Full_Train_data.csv"
+        ssl_csv = csv_name if csv_name else  "isic_ssl_data.csv"
         test_csv = csv_name if csv_name else "isic_test_data.csv"
 
         if data_path:

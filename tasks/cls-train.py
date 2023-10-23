@@ -14,10 +14,7 @@ import utilities.runUtils as rutl
 import utilities.logUtils as lutl
 from utilities.metricUtils import MultiClassMetrics
 
-from algorithms.vne import compute_VNEntropy
-from algorithms.vicreg import compute_AutoVarCovLoss
-from algorithms.barlow  import compute_AutoCorrBTLoss
-from algorithms.classifier import ClassifierNet, ClassifierWithProjectorNet
+from algorithms.classifier import ClassifierNet
 
 
 
@@ -34,7 +31,7 @@ test_partitions = 6,
 override_csv = None,
 
 ## data specifics
-dirichlet_alpha = None, # for Cifar100
+dirichlet_alpha = 999, # for Cifar100
 
 epochs        = 100,
 image_size    = 200,
@@ -45,9 +42,9 @@ learning_rate = 1e-4,
 weight_decay  = 1e-6,
 enable_scheduler = True,
 
-reg_method    = "VIC", ## VNE ; VIC ; BT
-reg_coeff     = 1,  ## vne:0.5 ; vic:0.05 bt:0.001
-projector    = [ 2048, 2048, 2048 ],
+reg_method    = "NONE",
+reg_coeff     = 0,
+
 
 featx_arch     = "resnet18",
 featx_pretrain = "IMAGENET-1K" , # "IMAGENET-1K" or None
@@ -136,14 +133,13 @@ def getModelnOptimizer(model_key=None, device="cpu"):
         m_state = torch.load(CFG.featx_pretrain, map_location='cpu')
     else: torch_pretrain_flag = CFG.featx_pretrain
 
-    model = ClassifierWithProjectorNet(arch=CFG.featx_arch,
+    model = ClassifierNet(arch=CFG.featx_arch,
                     fc_layer_sizes    = CFG.clsfy_layers,
                     feature_dropout   = CFG.featx_dropout,
                     classifier_dropout= CFG.clsfy_dropout,
                     feature_freeze    = CFG.featx_freeze,
                     feature_bnorm     = CFG.featx_bnorm,
-                    torch_pretrain    = torch_pretrain_flag,
-                    projector_sizes   = CFG.projector
+                    torch_pretrain    = torch_pretrain_flag
                     )
 
     if m_state:
@@ -166,16 +162,9 @@ def getModelnOptimizer(model_key=None, device="cpu"):
     scheduler_list = False
     scheduler_list = []
     if CFG.enable_scheduler:
-        if CFG.dataset == "ORGAN-MNIST":
-            scheduler_list.append(optim.lr_scheduler.MultiStepLR( optimizer,
-                            milestones=[50, 75], gamma=0.1))
-        elif CFG.dataset == "ISIC":
-            scheduler_list.append(optim.lr_scheduler.MultiStepLR( optimizer,
-                                    milestones=[50, 75], gamma=0.1))
-        elif CFG.dataset == "CIFAR":
-            scheduler_list.append(optim.lr_scheduler.MultiStepLR( optimizer,
-                milestones=[50, 75], gamma=0.1))
-        else: raise(f"Scheduler Enabled but Dataset class unknown {CFG.dataset}")
+        scheduler_list.append(optim.lr_scheduler.MultiStepLR( optimizer,
+                        milestones=[int(CFG.epochs*0.5), int(CFG.epochs*0.75)],
+                        gamma=0.1))
 
         lutl.LOG2TXT(f"Schedulers Enabled: {scheduler_list}",
                     CFG.gLogPath +'/misc.txt', console= False)
@@ -191,9 +180,7 @@ def getLossFunc():
     # lossfn = WeightedFocalLoss(alpha=class_weights, gamma=0.2)
     ce_loss = nn.CrossEntropyLoss()
 
-    if   CFG.reg_method == "VNE": reg_loss = compute_VNEntropy
-    elif CFG.reg_method == "VIC": reg_loss = compute_AutoVarCovLoss
-    elif CFG.reg_method == "BT":  reg_loss = compute_AutoCorrBTLoss
+    if   CFG.reg_method == "TBD": reg_loss = lambda x: torch.tensor(0)
     else: reg_loss = lambda x: torch.tensor(0)
 
     def lossfunc(pred, tgt, feature):
@@ -232,7 +219,7 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
 
     save_current_configs(CFG)
 
-    lutl.LOG2TXT(f"C:{center_index}"*10, CFG.gLogPath +'/misc.txt', console= False)
+    lutl.LOG2TXT((5*"*")+f"C:{center_index}", CFG.gLogPath +'/misc.txt', console= False)
 
     ### DATA ACCESS
     trainloader, validloader = getDataLoaders(CFG, center_index, type="train")
@@ -287,8 +274,8 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
             for img, tgt in tqdm(validloader):
                 img = img.to(gpu_device, non_blocking=True)
                 tgt = tgt.to(gpu_device, non_blocking=True)
-                pred, featx = model.forward(img)
-                loss, loss_info = lossfn(pred, tgt, featx)
+                pred, aux = model.forward(img)
+                loss, loss_info = lossfn(pred, tgt, aux)
                 validMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
 
         ## Log Metrics TODO Add balanced and F1
@@ -363,7 +350,7 @@ def simple_test(saved_logpath):
             for img, tgt in tqdm(testloader, disable=CFG.disable_tqdm):
                 img = img.to(gpu_device, non_blocking=True)
                 tgt = tgt.to(gpu_device, non_blocking=True)
-                pred = model.forward(img)
+                pred, _ = model.forward(img)
                 testMetric.add_entry(torch.argmax(pred, dim=1), tgt)
 
             ## Log detailed validation
@@ -388,14 +375,30 @@ def simple_test(saved_logpath):
 
 if __name__ == '__main__':
 
+    def runner(c="all", m=None, t=""):
+        logpth = simple_main(center_index=c, model_key=m,
+                    folder_suffix=t)
+        simple_test(logpth)
+
+    ##-----------------------
+
     # model_list = ["global_model"]+[f"local_model_{i}" for i in range(CFG.data_centers_count)]
-    # model_list = ["global_model"]
     model_list = [None]
 
-    # center_list = ["all"] +list(range(CFG.data_centers_count))
-    center_list = ["all"]
+    center_list = ["all"] +list(range(CFG.data_centers_count))
+    # center_list = ["all"]
 
-    for m in model_list:
-        for c in center_list:
-            logpth = simple_main(center_index=c, model_key=m)
-            simple_test(logpth)
+
+    if CFG.dataset == "CIFAR":
+        for m in model_list:
+            runner("all", m)
+            for c in center_list.remove("all"):
+                for q in [1000, 100, 10, 1, 0]:
+                    CFG.dirichlet_alpha = q
+                    qtitle = f"/{q}_aleph/"
+                    runner(c,m,qtitle)
+
+    else:
+        for m in model_list:
+            for c in center_list:
+                runner(c,m)

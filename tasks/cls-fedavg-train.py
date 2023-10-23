@@ -15,7 +15,7 @@ import utilities.logUtils as lutl
 import utilities.fedUtils as fedutl
 from utilities.metricUtils import MultiClassMetrics
 
-from algorithms.classifier import ClassifierNet, ClassifierWithProjectorNet
+from algorithms.classifier import ClassifierNet
 
 
 print(f"Pytorch version: {torch.__version__}")
@@ -183,9 +183,7 @@ def getLossFunc():
     # lossfn = WeightedFocalLoss(alpha=class_weights, gamma=0.2)
     ce_loss = nn.CrossEntropyLoss()
 
-    if   CFG.reg_method == "A": reg_loss = None
-    elif CFG.reg_method == "B": reg_loss = None
-    elif CFG.reg_method == "C":  reg_loss = None
+    if   CFG.reg_method == "TBD": reg_loss = lambda x: torch.tensor(0)
     else: reg_loss = lambda x: torch.tensor(0)
 
     def lossfunc(pred, tgt, feature, aggstat):
