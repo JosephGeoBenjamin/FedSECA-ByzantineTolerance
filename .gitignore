@@ -1,0 +1,13 @@
+.vscode
+__pycache__
+*.ipynb
+
+configs/*
+auto-scripts/*
+weights/*
+hypothes*
+*/data/*
+todo.txt
+
+!README.md
+!readme.md
