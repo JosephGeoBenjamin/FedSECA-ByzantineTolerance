@@ -1,5 +1,5 @@
 """
-Code Take from :: https://github.com/nikitaivkin/csh/ Kudos! for wonderful code.
+Code Taken and Adapted from :: https://github.com/nikitaivkin/csh/ Kudos! for wonderful code.
 
 Camel Casing for names
 """
@@ -381,7 +381,7 @@ class CountSketchVec(object):
         else:
             return self._findHHThr(thr)
 
-    def unSketch(self, k=None, epsilon=None):
+    def unSketch(self, k=None, epsilon=None, all=False):
         """ Performs heavy-hitter recovery on the sketch
 
         Args:
@@ -389,28 +389,32 @@ class CountSketchVec(object):
             epsilon: if not None, the approximation error in the recovery.
                 The returned heavy hitters are estimated to be greater
                 than epsilon * self.l2estimate()
+            all: if not False will recover the All values of vector.
 
         Returns:
-            A vector containing the heavy hitters, with zero everywhere
-            else
-
+            A vector containing the heavy hitters, with zero everywhere else
+            recovery is always based on median across rows
         Note:
-            exactly one of k and epsilon must be non-None
+            exactly one of k / all /epsilon must be non-None or enabled
         """
+
+        assert sum([bool(k), bool(epsilon), bool(all)])==1, "Only one of K/all/epsilon must be enabled"
+
+        if all:
+            unSketched = self._findAllValues()
+            return unSketched
 
         # either epsilon or k might be specified
         # (but not both). Act accordingly
-        if epsilon is None:
-            thr = None
-        else:
-            thr = epsilon * self.l2estimate()
+        if epsilon is None: thr = None
+        else:  thr = epsilon * self.l2estimate()
 
         hhs = self._findHHs(k=k, thr=thr)
 
         if k is not None:
             assert(len(hhs[1]) == k)
         if epsilon is not None:
-            assert((hhs[1] < thr).sum() == 0)
+            assert((hhs[1] < thr).sum() == 0) ## TODO: debig intent
 
         # the unsketched vector is 0 everywhere except for HH
         # coordinates, which are set to the HH values
@@ -442,10 +446,11 @@ class CountSketchVec(object):
         med = torch.median(torch.stack(tables), dim=0)[0]
         returnCSVec = copy.deepcopy(csvecs[0])
         returnCSVec.table = med
+        print("in Median", returnCSVec.table.shape )
         return returnCSVec
 
     @classmethod
-    def sum(cls, csvecs):
+    def mean(cls, csvecs):
         # make sure all CSVecs match
         d = csvecs[0].d
         c = csvecs[0].c
@@ -460,7 +465,9 @@ class CountSketchVec(object):
             assert(csvec.numBlocks == numBlocks)
 
         tables = [csvec.table for csvec in csvecs]
-        summed = torch.sum(torch.stack(tables), dim=0)[0]
+        meaned = torch.sum(torch.stack(tables), dim=0) / len(csvecs)
         returnCSVec = copy.deepcopy(csvecs[0])
-        returnCSVec.table = summed
+        returnCSVec.table = meaned
+        print("in Summed", returnCSVec.table.shape )
+
         return returnCSVec
