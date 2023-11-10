@@ -15,6 +15,7 @@ import utilities.logUtils as lutl
 import utilities.fedUtils as fedutl
 from utilities.metricUtils import MultiClassMetrics
 
+import algorithms.federation_ops as fedops
 from algorithms.classifier import ClassifierNet
 
 
@@ -405,7 +406,7 @@ def simple_main(model_key=None, folder_suffix=""):
             local_weights.append(copy.deepcopy(weight))
             local_astats.append(astat)
 
-        global_weights = fedutl.global_average_weights(local_weights)
+        global_weights = fedops.global_average_weights(local_weights)
         global_model.load_state_dict(global_weights)
 
         # save checkpoint
