@@ -42,7 +42,7 @@ class MultiClassMetrics():
     def add_entry(self, prd, tgt, loss=0, loss_info={}):
         self.prd.extend(prd.cpu().detach().numpy())
         self.tgt.extend(tgt.cpu().detach().numpy())
-        if loss: self.nnloss.append(loss.cpu().detach().numpy())
+        if loss: self.nnloss.append(loss.cpu().detach().numpy().round(decimals=self.digits+2))
         if loss_info: self.loss_info_list.append(loss_info)
 
     def get_loss(self):
@@ -93,8 +93,6 @@ class MultiClassMetrics():
             out_agg[k] = info_agg[k] / info_agg[str(k)+"_count"]
 
         return out_agg
-
-
 
 
     def _write_predictions(self, title="cls"):

@@ -6,6 +6,7 @@ configs/*
 auto-scripts/*
 weights/*
 hypothes*
+data
 */data/*
 todo.txt
 

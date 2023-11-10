@@ -42,12 +42,10 @@ learning_rate   = 5e-4,
 weight_decay    = 1e-6,
 enable_scheduler = True,
 
-enable_weight_fedavg = True,
-mvs_method  = "NONE", ## eigen_deviance
+enable_weight_reinit = True, # FedAvg protocol, true in general cases
 
-reg_method   = "VIC", ## VNE ; VIC ; BT
-reg_coeff    = 1,  ## vne:0.1 ; vic:0.5 bt:0.5
-projector    = [ 2048, 2048, 2048 ],
+reg_method   = "NONE",
+reg_coeff    = 0.0,
 
 featx_arch     = "resnet18",
 featx_pretrain = "IMAGENET-1K" , # "IMAGENET-1K" or None``
@@ -144,14 +142,13 @@ def getModel(model_key=None, device="cpu"):
         m_state = torch.load(CFG.featx_pretrain, map_location='cpu')
     else: torch_pretrain_flag = CFG.featx_pretrain
 
-    model = ClassifierWithProjectorNet(arch=CFG.featx_arch,
+    model = ClassifierNet(arch=CFG.featx_arch,
                     fc_layer_sizes    = CFG.clsfy_layers,
                     feature_dropout   = CFG.featx_dropout,
                     classifier_dropout= CFG.clsfy_dropout,
                     feature_freeze    = CFG.featx_freeze,
                     feature_bnorm     = CFG.featx_bnorm,
                     torch_pretrain    = torch_pretrain_flag,
-                    projector_sizes   = CFG.projector
                     )
 
     if m_state:
@@ -168,15 +165,6 @@ def getModel(model_key=None, device="cpu"):
 
 ### ============================================================================
 
-mvs_agg_flag = True
-if CFG.mvs_method == "eigen_deviance":
-    from algorithms.aggregation_operations import EigenDevianceΞClsMVS as ClsMVStat
-elif CFG.mvs_method in ("NONE", False, None, "Noe"):
-    mvs_agg_flag = False
-else:
-    raise ValueError(f"Unknown MVS_method set {CFG.mvs_method}")
-
-
 
 
 def getLossFunc():
@@ -189,26 +177,20 @@ def getLossFunc():
     def lossfunc(pred, tgt, feature, aggstat):
         ce  = ce_loss(pred, tgt)
         rl  = reg_loss(feature)
-        fl  = torch.tensor(0); fl_info = {}
 
-        if mvs_agg_flag:
-            fl, fl_info = ClsMVStat.compute_local_loss(
-                bstat={"lZX": feature},
-                aggstat=aggstat)
+        loss = ce+ CFG.reg_coeff*rl
 
-        loss = (ce+ CFG.reg_coeff*rl + fl)
-
-        loss_info = dict(**{"CE":ce.item(), "REG":rl.item()}, **fl_info)
+        loss_info = dict(**{"CE":ce.item(), "REG":rl.item()},)
         return loss, loss_info
 
-    lutl.LOG2TXT(f"Using the Loss::::{CFG.reg_method}",  CFG.gLogPath +'/misc.txt')
+    lutl.LOG2TXT(f"Using the Loss:::: CE + REG_{CFG.reg_method}",  CFG.gLogPath +'/misc.txt')
     return lossfunc
 
 
 ### ============================================================================
 
 
-class ClsFedMVSHandler(object):
+class ClsFedHandler(object):
     def __init__(self, trainloader, lossfunc, id=None,
                  validloader=None, device="cuda"):
 
@@ -218,8 +200,8 @@ class ClsFedMVSHandler(object):
         self.lossfunc    = lossfunc
         self.device      = device
 
-        self.trainMetric = MultiClassMetrics(CFG.gLogPath)
-        self.validMetric = MultiClassMetrics(CFG.gLogPath)
+        self.trainMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
+        self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.loc_val_best = 0.0
 
         ##unused
@@ -254,8 +236,8 @@ class ClsFedMVSHandler(object):
 
             optimizer.zero_grad()
             # with torch.cuda.amp.autocast():
-            pred, featp = model.forward(img)
-            loss, loss_info = self.lossfunc(pred, tgt, featp, self.aggstat)
+            pred = model.forward(img)
+            loss, loss_info = self.lossfunc(pred, tgt, None, self.aggstat)
 
             if CFG.enable_fedprox:
                 proximal_term = 0.0
@@ -270,14 +252,8 @@ class ClsFedMVSHandler(object):
             # self.local_scaler.update()
             self.trainMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
 
-            if mvs_agg_flag:
-                stat_accum = ClsMVStat.accumulate_locals(featp, stat_dict=stat_accum)
         #end epoch
         if scheduler: scheduler.step()
-
-        if mvs_agg_flag:
-            locstat = ClsMVStat.create_local_mvstats(stat_dict=stat_accum)
-            del stat_accum
 
         model.eval()
         with torch.no_grad():
@@ -285,8 +261,8 @@ class ClsFedMVSHandler(object):
                 img = img.to(self.device, non_blocking=True)
                 tgt = tgt.to(self.device, non_blocking=True)
                 if img.shape[0] < 2: continue # fix last batch size being 1 issue
-                pred, featp = model.forward(img)
-                loss, loss_info = self.lossfunc(pred, tgt, featp, self.aggstat)
+                pred = model.forward(img)
+                loss, loss_info = self.lossfunc(pred, tgt, None, self.aggstat)
                 self.validMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
 
         logs = dict(mode="Epoch-up", epoch=epoch, ID=self.id,
@@ -300,31 +276,29 @@ class ClsFedMVSHandler(object):
                     validlossInfo = self.validMetric.get_loss_info_aggregates(),
                     time=int(time.time()),)
         lutl.LOG2DICTXT(logs, CFG.gLogPath +'/train-local-stats.txt')
+        lutl.LOG2CSV( [self.id,"#",epoch,"#"]+self.trainMetric.nnloss, CFG.gLogPath +'metrics/train-losses.csv')
 
-        train_epoch_loss = self.trainMetric.get_loss()
-
-        if not CFG.enable_weight_fedavg:
-            best_flag = False
-            if self.loc_val_best < logs['validF1']:
-                torch.save(model.state_dict(), CFG.gWeightPath +f'/best_local_model_{self.id}.pth')
-                self.loc_val_best = logs['validF1']
-                best_flag = True
-                detail_stat = dict( ID=self.id, best = best_flag, epoch=epoch,
-                        validbalacc = self.validMetric.get_balanced_accuracy(),
-                        validf1scr  = self.validMetric.get_f1score(),
-                        # validreport = self.validMetric.get_class_report(),
-                        # validconfus = validMetric.get_confusion_matrix().tolist(),
-                    )
-                lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-locals-details.txt', console=False)
-        #fi--- no fedavg case
+        best_flag = False
+        if self.loc_val_best < logs['validF1']:
+            torch.save(model.state_dict(), CFG.gWeightPath +f'/best_local_model_{self.id}.pth')
+            self.loc_val_best = logs['validF1']
+            best_flag = True
+            detail_stat = dict( ctime= time.ctime(),
+                    ID=self.id, best = best_flag, epoch=epoch,
+                    validbalacc = self.validMetric.get_balanced_accuracy(),
+                    validf1scr  = self.validMetric.get_f1score(),
+                    validreport = self.validMetric.get_class_report(),
+                    # validconfus = validMetric.get_confusion_matrix().tolist(),
+                )
+            lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-local-bests.txt', console=False)
 
         self.trainMetric.reset()
         self.validMetric.reset()
 
-        return model.state_dict(), train_epoch_loss, locstat
+        return model.state_dict(), {}
 
 
-    def update_parameters(self, model, aggstat):
+    def update_parameters(self, model, aggstat=None):
         self.local_model = model.to(self.device)
         self.local_optim = optim.AdamW(model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)
@@ -333,7 +307,8 @@ class ClsFedMVSHandler(object):
         self.local_scheduler = None
         if CFG.enable_scheduler:
             self.local_scheduler = optim.lr_scheduler.MultiStepLR(self.local_optim,
-                                    milestones=[50, 75], gamma=0.1)
+                                    milestones=[int(CFG.epochs*0.5), int(CFG.epochs*0.75)],
+                                    gamma=0.1)
 
         self.aggstat = aggstat
 
@@ -343,7 +318,7 @@ class ClsFedMVSHandler(object):
 ### ----------------------------------------------------------------------------
 
 
-def simple_main(model_key=None, center_index=None, folder_suffix=""):
+def simple_main(model_key=None, folder_suffix=""):
 
     ### SETUP
     rutl.START_SEED()
@@ -353,7 +328,6 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
 
     # -- log path --
     if model_key: folder_suffix +=f"/{model_key}/"
-    if not (center_index==None): folder_suffix +=f"/center_{center_index}/"
 
     CFG.gLogPath = CFG.checkpoint_dir+folder_suffix
     CFG.gWeightPath = CFG.gLogPath+"/weights/"
@@ -364,9 +338,6 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
     if not os.path.exists(CFG.gWeightPath): os.makedirs(CFG.gWeightPath)
 
     save_current_configs(CFG)
-
-    lutl.LOG2TXT((5*"*")+f"C:{center_index}", CFG.gLogPath +'/misc.txt', console= False)
-    if not CFG.enable_weight_fedavg: lutl.LOG2TXT(("&"*7)+" Forgoing FedAveraging Routine ....", CFG.gLogPath +'/misc.txt')
 
     ### DATA ACCESS
     traindozers, validdozers = getDataLoaders(CFG, type="train")
@@ -390,7 +361,7 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
     aggstat = {}
     fed_locals = {}
     for id in traindozers.keys():
-        fed_locals[id] = ClsFedMVSHandler(id= id,
+        fed_locals[id] = ClsFedHandler(id= id,
                                 lossfunc = lossfn,
                                 trainloader = traindozers[id],
                                 validloader = validdozers[id],
@@ -398,6 +369,8 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
         fed_locals[id].update_parameters(copy.deepcopy(global_model),
                                          aggstat=aggstat)
 
+
+    if not CFG.enable_weight_reinit: lutl.LOG2TXT(("&"*7)+" Forgoing FedAveraging Routine ....", CFG.gLogPath +'/misc.txt')
 
     ### MODEL TRAINING
     print("Update Mode set::", CFG.update_mode)
@@ -415,7 +388,7 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
     for itr in range(start_itrs, total_itrs):
 
         ## ------ Training Routine ------
-        local_weights, local_losses, local_bstats = [], [], []
+        local_weights, local_losses, local_astats = [], [], []
         global_model.train()
 
         for id in  traindozers.keys():
@@ -423,23 +396,17 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
             if CFG.update_mode == "epoch":
                 if CFG.enable_weight_fedavg:
                     fed_locals[id].update_parameters(copy.deepcopy(global_model), aggstat = aggstat)
-                else:
-                    fed_locals[id].aggstat = aggstat
-                weight, loss, bstat = fed_locals[id].train_one_epoch(epoch = itr)
+                else: fed_locals[id].aggstat = aggstat
+
+                weight, astat = fed_locals[id].train_one_epoch(epoch = itr)
 
             else: raise Exception("Unknown Update Mode set")
 
             local_weights.append(copy.deepcopy(weight))
-            local_losses.append(copy.deepcopy(loss))
-            local_bstats.append(bstat)
+            local_astats.append(astat)
 
         global_weights = fedutl.global_average_weights(local_weights)
         global_model.load_state_dict(global_weights)
-
-        avg_local_loss = sum(local_losses) / len(local_losses)
-
-        if mvs_agg_flag:
-            aggstat = ClsMVStat.get_global_aggregates(local_bstats)
 
         # save checkpoint
         Gstep = (itr+1)/CFG.local_rounds if CFG.update_mode == "step" else itr
@@ -448,29 +415,28 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
             Gstep = int(Gstep)
             state = dict(global_round=Gstep, global_model=global_model.state_dict())
             ## Local-Models
-            if not CFG.enable_weight_fedavg:
-                for id in traindozers.keys():
-                    state[f"local_model_{id}"]= fed_locals[id].local_model.state_dict()
+            #if not CFG.enable_weight_reinit: *->to save space
+            for id in traindozers.keys():
+                state[f"local_model_{id}"]= fed_locals[id].local_model.state_dict()
             torch.save(state, CFG.gWeightPath +f'/checkpoint.pth')
 
 
         ## ---- Global params Validation Routine ----
-        globalValidMetric = MultiClassMetrics(CFG.gLogPath+"/metrics_G/")
+        globalValidMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
 
         global_model.eval()
         with torch.no_grad():
             for img, tgt in tqdm(validdozers["all"]):
                 img = img.to(gpu_device, non_blocking=True)
                 tgt = tgt.to(gpu_device, non_blocking=True)
-                pred, featp = global_model.forward(img)
-                loss, loss_info = lossfn(pred, tgt, featp, aggstat)
+                pred = global_model.forward(img)
+                loss, loss_info = lossfn(pred, tgt, None, aggstat)
                 globalValidMetric.add_entry(torch.argmax(pred, dim=1),
                                             tgt, loss, loss_info)
 
         ## Log Metrics
         logs = dict(
                 global_round=Gstep,
-                train_loss_avg_loc=round(avg_local_loss, 4),
                 run_time  = time.time()-start_time,
                 validloss = globalValidMetric.get_loss(),
                 validacc  = globalValidMetric.get_balanced_accuracy(),
@@ -486,17 +452,15 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
             best_acc  = logs['validF1']
             best_loss = logs['validloss']
             best_flag = True
-
-            ##---> Log detailed validation
-            detail_stat = dict(
-                    epoch=Gstep, time=int(time.time() - start_time),
-                    best = best_flag,
+            detail_stat = dict( ctime= time.ctime(),
+                    epoch=Gstep, best = best_flag,
+                    run_time=int(time.time() - start_time),
                     validbalacc = globalValidMetric.get_balanced_accuracy(),
                     validf1scr  = globalValidMetric.get_f1score(),
                     validreport = globalValidMetric.get_class_report(),
                     # validconfus = validMetric.get_confusion_matrix().tolist(),
                 )
-            lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/validation-full-details.txt', console=False)
+            lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-global-bests.txt', console=False)
 
     return CFG.gLogPath
 
@@ -532,7 +496,7 @@ def simple_test(saved_logpath, model_list=["global_model"]):
             test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
             for c in ["all"]+ list(range(test_center_num)):
                 testloader = getDataLoaders(CFG, center_index=c, type="test")
-                testMetric = MultiClassMetrics(saved_logpath+ f"/{p_k}-test-metric")
+                testMetric = MultiClassMetrics(saved_logpath+ f"/metrics/{p_k}-test")
                 model.eval()
 
                 start_time = time.time()
@@ -550,6 +514,7 @@ def simple_test(saved_logpath, model_list=["global_model"]):
                             model_type  = p_k,
                             test_center = c,
                             timetaken   = int(time.time() - start_time),
+                            ctime       = time.ctime(),
                             testf1scr   = testMetric.get_f1score(),
                             testbalacc  = testMetric.get_balanced_accuracy(),
                             testacc     = testMetric.get_accuracy(),
@@ -568,8 +533,8 @@ def simple_test(saved_logpath, model_list=["global_model"]):
 if __name__ == '__main__':
 
 
-    model_list = (["global_model"] if CFG.enable_weight_fedavg else
-    ["global_model"]+[f"local_model_{i}" for i in range(CFG.data_centers_count)])
+    model_list = ["global_model"]+[f"local_model_{i}"
+                                   for i in range(CFG.data_centers_count)]
 
 
     if CFG.dataset == "CIFAR":
