@@ -44,6 +44,7 @@ weight_decay    = 1e-6,
 enable_scheduler = True,
 
 enable_weight_reinit = True, # FedAvg protocol, true in general cases
+fed_approach = "fedavg",
 
 reg_method   = "NONE",
 reg_coeff    = 0.0,
@@ -166,6 +167,12 @@ def getModel(model_key=None, device="cpu"):
 
 ### ============================================================================
 
+def getFedMethod():
+    if CFG.fed_approach == "fedavg":
+        fedmethod = fedops.SimpleΞFedAvg
+    else:
+        raise Exception("Unknown Method given", CFG.fed_approach)
+    return fedmethod
 
 
 def getLossFunc():
@@ -175,7 +182,7 @@ def getLossFunc():
     if   CFG.reg_method == "TBD": reg_loss = lambda x: torch.tensor(0)
     else: reg_loss = lambda x: torch.tensor(0)
 
-    def lossfunc(pred, tgt, feature, aggstat):
+    def lossfunc(pred, tgt, feature, agghatch):
         ce  = ce_loss(pred, tgt)
         rl  = reg_loss(feature)
 
@@ -193,13 +200,15 @@ def getLossFunc():
 
 class ClsFedHandler(object):
     def __init__(self, trainloader, lossfunc, id=None,
-                 validloader=None, device="cuda"):
+                 validloader=None, fedmethod = None,
+                 device="cuda"):
 
         self.id          = id
         self.trainloader = trainloader
         self.validloader = validloader
         self.lossfunc    = lossfunc
         self.device      = device
+        self.fedmethod   = fedmethod
 
         self.trainMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
@@ -210,7 +219,7 @@ class ClsFedHandler(object):
         self.local_optim = None
         self.local_scaler = None
         self.local_model = None
-        self.aggstat     = None
+        self.agghatch     = None
 
     def train_one_epoch(self, epoch):
 
@@ -222,7 +231,7 @@ class ClsFedHandler(object):
         if CFG.enable_fedprox:
             global_model_prox = copy.deepcopy(model)
 
-        scheduler.last_epoch = epoch
+        if scheduler: scheduler.last_epoch = epoch
         stat_accum = {}; locstat = {}
         model.train()
         ### ---------
@@ -237,8 +246,8 @@ class ClsFedHandler(object):
 
             optimizer.zero_grad()
             # with torch.cuda.amp.autocast():
-            pred = model.forward(img)
-            loss, loss_info = self.lossfunc(pred, tgt, None, self.aggstat)
+            pred, featp = model.forward(img)
+            loss, loss_info = self.lossfunc(pred, tgt, featp, self.agghatch)
 
             if CFG.enable_fedprox:
                 proximal_term = 0.0
@@ -262,8 +271,8 @@ class ClsFedHandler(object):
                 img = img.to(self.device, non_blocking=True)
                 tgt = tgt.to(self.device, non_blocking=True)
                 if img.shape[0] < 2: continue # fix last batch size being 1 issue
-                pred = model.forward(img)
-                loss, loss_info = self.lossfunc(pred, tgt, None, self.aggstat)
+                pred, featp = model.forward(img)
+                loss, loss_info = self.lossfunc(pred, tgt, featp, self.agghatch)
                 self.validMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
 
         logs = dict(mode="Epoch-up", epoch=epoch, ID=self.id,
@@ -296,10 +305,10 @@ class ClsFedHandler(object):
         self.trainMetric.reset()
         self.validMetric.reset()
 
-        return model.state_dict(), {}
+        return { "weight_state": model.state_dict()}
 
 
-    def update_parameters(self, model, aggstat=None):
+    def update_parameters(self, model, agghatch=None):
         self.local_model = model.to(self.device)
         self.local_optim = optim.AdamW(model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)
@@ -310,8 +319,7 @@ class ClsFedHandler(object):
             self.local_scheduler = optim.lr_scheduler.MultiStepLR(self.local_optim,
                                     milestones=[int(CFG.epochs*0.5), int(CFG.epochs*0.75)],
                                     gamma=0.1)
-
-        self.aggstat = aggstat
+        self.agghatch = agghatch
 
         self.local_optim.zero_grad()
 
@@ -347,6 +355,8 @@ def simple_main(model_key=None, folder_suffix=""):
     global_model = getModel(model_key, gpu_device)
     lossfn = getLossFunc()
 
+    fedmethod = getFedMethod()
+
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
         ckpt = torch.load(CFG.gWeightPath  +'/checkpoint.pth',
@@ -359,8 +369,9 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
     ### LOCAL SILOS setup
-    aggstat = {}
-    fed_locals = {}
+    agghatch      = None    # expanded/desynopsized local information
+    global_aggset = None   # synopsized aggregate form global
+    fed_locals    = {}     # local Models hanger
     for id in traindozers.keys():
         fed_locals[id] = ClsFedHandler(id= id,
                                 lossfunc = lossfn,
@@ -368,7 +379,7 @@ def simple_main(model_key=None, folder_suffix=""):
                                 validloader = validdozers[id],
                                 )
         fed_locals[id].update_parameters(copy.deepcopy(global_model),
-                                         aggstat=aggstat)
+                                         agghatch=agghatch)
 
 
     if not CFG.enable_weight_reinit: lutl.LOG2TXT(("&"*7)+" Forgoing FedAveraging Routine ....", CFG.gLogPath +'/misc.txt')
@@ -389,27 +400,29 @@ def simple_main(model_key=None, folder_suffix=""):
     for itr in range(start_itrs, total_itrs):
 
         ## ------ Training Routine ------
-        local_weights, local_losses, local_astats = [], [], []
+        local_losses, local_model_clues = [], []
         global_model.train()
 
         for id in  traindozers.keys():
+            lmodel, agghatch = fedmethod.desynopsize_local(fed_locals[id].local_model,
+                                                           global_aggset)
             ## run one epoch
             if CFG.update_mode == "epoch":
                 if CFG.enable_weight_fedavg:
-                    fed_locals[id].update_parameters(copy.deepcopy(global_model), aggstat = aggstat)
-                else: fed_locals[id].aggstat = aggstat
+                    fed_locals[id].update_parameters(lmodel, agghatch)
+                else: fed_locals[id].agghatch = agghatch
 
-                weight, astat = fed_locals[id].train_one_epoch(epoch = itr)
-
+                lret = fed_locals[id].train_one_epoch(epoch = itr)
             else: raise Exception("Unknown Update Mode set")
 
-            local_weights.append(copy.deepcopy(weight))
-            local_astats.append(astat)
+            local_model_clues.append(fedmethod.synopsize_local(lret))
 
-        global_weights = fedops.global_average_weights(local_weights)
-        global_model.load_state_dict(global_weights)
+        global_aggset = fedmethod.aggregate_globally(local_model_clues)
 
-        # save checkpoint
+        ## caching to global_object for analysis
+        global_model, _ = fedmethod.desynopsize_local(global_model, global_aggset)
+
+        ## save checkpoint
         Gstep = (itr+1)/CFG.local_rounds if CFG.update_mode == "step" else itr
 
         if (Gstep+1) % CFG.ckpt_freq_Gstep == 0:
@@ -430,8 +443,8 @@ def simple_main(model_key=None, folder_suffix=""):
             for img, tgt in tqdm(validdozers["all"]):
                 img = img.to(gpu_device, non_blocking=True)
                 tgt = tgt.to(gpu_device, non_blocking=True)
-                pred = global_model.forward(img)
-                loss, loss_info = lossfn(pred, tgt, None, aggstat)
+                pred, featp = global_model.forward(img)
+                loss, loss_info = lossfn(pred, tgt, featp, agghatch)
                 globalValidMetric.add_entry(torch.argmax(pred, dim=1),
                                             tgt, loss, loss_info)
 

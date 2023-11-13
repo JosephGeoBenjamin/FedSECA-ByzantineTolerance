@@ -47,7 +47,7 @@ class ClassifierNet(nn.Module):
         out  = self.featx_proc(feat)
         out  = self.classifier(out)
 
-        return out
+        return out, torch.tensor(0)
 
 
 ##==============================================================================
