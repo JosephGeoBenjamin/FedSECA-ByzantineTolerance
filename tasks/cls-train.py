@@ -262,10 +262,10 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
         if scheduler_list:
             for scheduler in scheduler_list: scheduler.step()
 
-        ## save checkpoint states
-        # state = dict(epoch=epoch + 1, model=model.state_dict(),
-        #                 optimizer=optimizer.state_dict())
-        # torch.save(state, CFG.gWeightPath +'/checkpoint.pth')
+        # # save checkpoint states
+        state = dict(epoch=epoch + 1, model=model.state_dict(),
+                        optimizer=optimizer.state_dict())
+        torch.save(state, CFG.gWeightPath +'/checkpoint.pth')
 
 
         ## ---- Validation Routine ----
@@ -333,43 +333,49 @@ def simple_test(saved_logpath):
                     feature_bnorm     = CFG.featx_bnorm,
                     )
     model = model.to(gpu_device)
-    ret_msg = model.load_state_dict(torch.load(saved_logpath+"/weights/bestmodel.pth"), strict=False)
-    lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {saved_logpath} ",
-                     CFG.gLogPath +'/misc.txt')
+
+    pth_list = {
+        "best": torch.load(saved_logpath+f"/weights/bestmodel.pth"),
+        "last": torch.load(saved_logpath+"/weights/checkpoint.pth")[f"model"],
+        }
 
     ### MODEL TESTING
+    for p_k, pth_wgt in pth_list.items():
+        ret_msg = model.load_state_dict(pth_wgt, strict=False)
+        lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
+                        CFG.gLogPath +'/misc.txt')
 
-    test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
-    for c in ["all"]+ list(range(test_center_num)):
-        testloader = getDataLoaders(CFG, center_index=c, type="test")
-        testMetric = MultiClassMetrics(saved_logpath)
-        model.eval()
+        test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
+        for c in ["all"]+ list(range(test_center_num)):
+            testloader = getDataLoaders(CFG, center_index=c, type="test")
+            testMetric = MultiClassMetrics(saved_logpath+f"/metrics/{p_k}-test")
+            model.eval()
 
-        start_time = time.time()
-        with torch.no_grad():
-            for img, tgt in tqdm(testloader, disable=CFG.disable_tqdm):
-                img = img.to(gpu_device, non_blocking=True)
-                tgt = tgt.to(gpu_device, non_blocking=True)
-                pred, _ = model.forward(img)
-                testMetric.add_entry(torch.argmax(pred, dim=1), tgt)
+            start_time = time.time()
+            with torch.no_grad():
+                for img, tgt in tqdm(testloader, disable=CFG.disable_tqdm):
+                    img = img.to(gpu_device, non_blocking=True)
+                    tgt = tgt.to(gpu_device, non_blocking=True)
+                    pred, _ = model.forward(img)
+                    testMetric.add_entry(torch.argmax(pred, dim=1), tgt)
 
-            ## Log detailed validation
-            log_title = f"test-{c}"
-            detail_stat = dict(
-                    model_used  = os.path.basename(saved_logpath),
-                    test_center = c,
-                    timetaken   = int(time.time() - start_time),
-                    testf1scr   = testMetric.get_f1score(),
-                    testbalacc  = testMetric.get_balanced_accuracy(),
-                    testacc     = testMetric.get_accuracy(),
-                    testreport  = testMetric.get_class_report(),
-                    testconfus  = testMetric.get_confusion_matrix(
-                                    save_png= True, title=log_title).tolist(),
-                )
-            lutl.LOG2DICTXT(detail_stat, saved_logpath+'/test-results.txt',
-                            console=True)
+                ## Log detailed validation
+                log_title = f"test-{p_k}-{c}"
+                detail_stat = dict(
+                        model_type  = p_k,
+                        test_center = c,
+                        timetaken   = int(time.time() - start_time),
+                        testf1scr   = testMetric.get_f1score(),
+                        testbalacc  = testMetric.get_balanced_accuracy(),
+                        testacc     = testMetric.get_accuracy(),
+                        testreport  = testMetric.get_class_report(),
+                        testconfus  = testMetric.get_confusion_matrix(
+                                        save_png= True, title=log_title).tolist(),
+                    )
+                lutl.LOG2DICTXT(detail_stat, saved_logpath+'/test-results.txt',
+                                console=True)
 
-            testMetric._write_predictions(title=log_title)
+                testMetric._write_predictions(title=log_title)
 
 
 
@@ -392,7 +398,8 @@ if __name__ == '__main__':
     if CFG.dataset == "CIFAR":
         for m in model_list:
             runner("all", m)
-            for c in center_list.remove("all"):
+            center_list.remove("all")
+            for c in center_list:
                 for q in [1000, 100, 10, 1, 0]:
                     CFG.dirichlet_alpha = q
                     qtitle = f"/{q}_aleph/"

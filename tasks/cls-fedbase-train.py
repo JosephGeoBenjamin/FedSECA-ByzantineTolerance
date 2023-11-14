@@ -518,7 +518,7 @@ def simple_test(saved_logpath, model_list=["global_model"]):
                     for img, tgt in tqdm(testloader, disable=CFG.disable_tqdm):
                         img = img.to(gpu_device, non_blocking=True)
                         tgt = tgt.to(gpu_device, non_blocking=True)
-                        pred = model.forward(img)
+                        pred,_ = model.forward(img)
                         testMetric.add_entry(torch.argmax(pred, dim=1), tgt)
 
                     ## Log detailed validation
