@@ -167,12 +167,14 @@ def getModel(model_key=None, device="cpu"):
 
 ### ============================================================================
 
-def getFedMethod():
+def getFedClass():
     if CFG.fed_approach == "fedavg":
-        fedmethod = fedops.SimpleΞFedAvg
+        fedClass = fedops.SimpleΞFedAvg
+    elif CFG.fed_approach == "countsketch":
+        fedClass = fedops.NaiveΞCountSketch
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
-    return fedmethod
+    return fedClass
 
 
 def getLossFunc():
@@ -200,15 +202,15 @@ def getLossFunc():
 
 class ClsFedHandler(object):
     def __init__(self, trainloader, lossfunc, id=None,
-                 validloader=None, fedmethod = None,
+                 validloader=None, fedobj = None,
                  device="cuda"):
 
-        self.id          = id
-        self.trainloader = trainloader
-        self.validloader = validloader
-        self.lossfunc    = lossfunc
-        self.device      = device
-        self.fedmethod   = fedmethod
+        self.id            = id
+        self.trainloader   = trainloader
+        self.validloader   = validloader
+        self.lossfunc      = lossfunc
+        self.device        = device
+        self.fedobj        = fedobj
 
         self.trainMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
@@ -305,7 +307,7 @@ class ClsFedHandler(object):
         self.trainMetric.reset()
         self.validMetric.reset()
 
-        return { "weight_state": model.state_dict()}
+        return { "model": copy.deepcopy(model)}
 
 
     def update_parameters(self, model, agghatch=None):
@@ -331,6 +333,7 @@ def simple_main(model_key=None, folder_suffix=""):
 
     ### SETUP
     rutl.START_SEED()
+    gpuid_generator = fedutl.gpu_devices_generator()
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
     print("GPU device", gpu_device)
@@ -355,7 +358,7 @@ def simple_main(model_key=None, folder_suffix=""):
     global_model = getModel(model_key, gpu_device)
     lossfn = getLossFunc()
 
-    fedmethod = getFedMethod()
+    fedClass = getFedClass()
 
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
@@ -369,14 +372,18 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
     ### LOCAL SILOS setup
-    agghatch      = None    # expanded/desynopsized local information
-    global_aggset = None   # synopsized aggregate form global
-    fed_locals    = {}     # local Models hanger
+    agghatch        = None   # expanded/desynopsized information w.r.t local model
+    global_agghatch = None   # expanded information w.r.t global model
+    global_aggset   = None   # synopsized aggregate form global
+    fed_locals      = {}     # local Models hanger
     for id in traindozers.keys():
-        fed_locals[id] = ClsFedHandler(id= id,
-                                lossfunc = lossfn,
+        device = next(gpuid_generator)
+        fed_locals[id] = ClsFedHandler(id   = id,
+                                lossfunc    = lossfn,
                                 trainloader = traindozers[id],
                                 validloader = validdozers[id],
+                                fedobj      = fedClass(CFG, global_model, device),
+                                device      = device
                                 )
         fed_locals[id].update_parameters(copy.deepcopy(global_model),
                                          agghatch=agghatch)
@@ -400,27 +407,30 @@ def simple_main(model_key=None, folder_suffix=""):
     for itr in range(start_itrs, total_itrs):
 
         ## ------ Training Routine ------
-        local_losses, local_model_clues = [], []
+        local_model_clues = []
         global_model.train()
 
         for id in  traindozers.keys():
-            lmodel, agghatch = fedmethod.desynopsize_local(fed_locals[id].local_model,
-                                                           global_aggset)
+            # lmodel, agghatch = fedClass.desynopsize_local(fed_locals[id].local_model,
+            #                                                global_aggset)
+            ## cached use for faster run; change later to top !!!!!
+            lmodel, agghatch = global_model, global_agghatch
+
             ## run one epoch
             if CFG.update_mode == "epoch":
                 if CFG.enable_weight_fedavg:
-                    fed_locals[id].update_parameters(lmodel, agghatch)
+                    fed_locals[id].update_parameters(copy.deepcopy(lmodel), agghatch)
                 else: fed_locals[id].agghatch = agghatch
 
                 lret = fed_locals[id].train_one_epoch(epoch = itr)
             else: raise Exception("Unknown Update Mode set")
 
-            local_model_clues.append(fedmethod.synopsize_local(lret))
+            local_model_clues.append(fed_locals[id].fedobj.synopsize_local(lret))
 
-        global_aggset = fedmethod.aggregate_globally(local_model_clues)
+        global_aggset = fedClass.aggregate_globally(local_model_clues)
 
         ## caching to global_object for analysis
-        global_model, _ = fedmethod.desynopsize_local(global_model, global_aggset)
+        global_model, global_agghatch = fedClass.desynopsize_local(global_model, global_aggset)
 
         ## save checkpoint
         Gstep = (itr+1)/CFG.local_rounds if CFG.update_mode == "step" else itr
