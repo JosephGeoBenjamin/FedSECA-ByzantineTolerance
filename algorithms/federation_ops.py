@@ -83,13 +83,18 @@ def get_param_from_state(state_dict:dict):
 
 
 def get_topK_param(model, K):
-    # top K both positive and negative (k/2 each)
     vec = get_param_from_model(model)
     out_vec = torch.zeros(vec.shape).to(vec.device)
-    v1, i1 = torch.topk(vec, k= K//2+K%2)
-    v2, i2 = torch.topk(vec, k= K//2, largest=False)
-    out_vec[i1] = v1
-    out_vec[i2] = v2
+
+    ### # top K both positive and negative (k/2 each)
+    # v1, i1 = torch.topk(vec, k= K//2+K%2, sorted=False)
+    # v2, i2 = torch.topk(vec, k= K//2, largest=False, sorted=False)
+    # out_vec[i1] = v1
+    # out_vec[i2] = v2
+
+    tv1, ti1 = torch.topk(vec**2, k=K, sorted=False)
+    out_vec[ti1] = vec[ti1]
+
     return out_vec
 
 
@@ -125,6 +130,15 @@ class SimpleΞFedAvg():
         lset["model"] = model_copier(zxs["model"])
         return lset
 
+    @staticmethod #
+    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
+        """
+        """
+        loss, print_info = torch.tensor(0), {}
+        return loss, print_info
+
+    #-------- Shared methods ----------
+
     @staticmethod #process global info for local use
     def desynopsize_local(model_struct, gset): #used at end of local round at each client
         """ model_struct: torch nn.module object
@@ -137,13 +151,6 @@ class SimpleΞFedAvg():
         ghatch = {}
 
         return model, ghatch
-
-    @staticmethod #
-    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
-        """
-        """
-        loss, print_info = torch.tensor(0), {}
-        return loss, print_info
 
     #-------- Server methods ----------
 
@@ -159,6 +166,7 @@ class SimpleΞFedAvg():
         gset = {"model": agg_model}
         return gset
 
+##==============================================================================
 
 class NaiveΞCountSketch():
 
@@ -226,3 +234,59 @@ class NaiveΞCountSketch():
         agg_sketch = agg_sketch / len(lsets)
         gset = {"sketch": agg_sketch}
         return gset
+
+
+class DeltaWeightΞCountSketch(NaiveΞCountSketch):
+    """ DeltaWeightΞCountSketch
+        Local and Global are expected to be Decoupled from each other
+        since no direct averaing update is observed
+    """
+
+    #-------- Stateful variables Local ------
+    def __init__(self, cfg, model, device="cpu"):
+        super().__init__(cfg, model, device)
+
+        self.model_tminus_1 = model
+
+    #-------- Client methods ----------
+
+    # @instancemethod #Locals calculation to send to Global
+    def synopsize_local(self, zxs): #used at end of local round at each client
+        """ zxs: {"model", }
+        """
+        lset = {}
+        old_param_vec = get_param_from_model(self.model_tminus_1)
+        new_param_vec = get_param_from_model(zxs["model"])
+
+        delta_param_vec = new_param_vec - old_param_vec
+        self.csobj.accumulateVec(delta_param_vec)
+
+        lset["sketch"] = copy.deepcopy(self.csobj)
+
+        self.csobj.zero()
+        self.model_tminus_1 = model_copier(zxs["model"])
+        return lset
+
+
+    #-------- Shared methods ----------
+
+    @staticmethod #process global info for local use
+    def desynopsize_local(model_struct, gset): #used at end of local round at each client
+        """ model_struct: torch nn.module object
+            gset: global aggregations {"sketch", }
+        """
+        ## since no compression or sketching used
+        model = model_copier(model_struct)
+        if not gset: return model, {}
+
+        delta_us_params = gset["sketch"].unSketch(all=True)
+        old_param_vec   = get_param_from_model(model_struct)
+
+        updated_param_vec = old_param_vec + delta_us_params
+
+        model = set_param_in_model(model, updated_param_vec)
+
+        ghatch = {}
+        return model, ghatch
+
+

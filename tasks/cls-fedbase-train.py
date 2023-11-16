@@ -172,6 +172,8 @@ def getFedClass():
         fedClass = fedops.SimpleΞFedAvg
     elif CFG.fed_approach == "countsketch":
         fedClass = fedops.NaiveΞCountSketch
+    elif CFG.fed_approach == "countsketch+deltaweight":
+        fedClass = fedops.DeltaWeightΞCountSketch
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
     return fedClass
@@ -411,10 +413,10 @@ def simple_main(model_key=None, folder_suffix=""):
         global_model.train()
 
         for id in  traindozers.keys():
-            # lmodel, agghatch = fedClass.desynopsize_local(fed_locals[id].local_model,
-            #                                                global_aggset)
-            ## cached use for faster run; change later to top !!!!!
-            lmodel, agghatch = global_model, global_agghatch
+            lmodel, agghatch = fedClass.desynopsize_local(fed_locals[id].local_model,
+                                                           global_aggset)
+            # ## cached use for faster run; above method is right/ logic-bugfree !!!!!
+            # lmodel, agghatch = global_model, global_agghatch
 
             ## run one epoch
             if CFG.update_mode == "epoch":
@@ -560,14 +562,20 @@ if __name__ == '__main__':
     model_list = ["global_model"]+[f"local_model_{i}"
                                    for i in range(CFG.data_centers_count)]
 
+    compressions = {#"1.5E": 8, #expand
+                    "2x": 24, "4x": 48, "8x": 96, "16x":198 }
 
-    if CFG.dataset == "CIFAR":
-        quantity = [1000, 100, 10, 1, 0]
-        for q in quantity:
-            CFG.dirichlet_alpha = q
-            qtitle = f"/{q}_aleph/"
-            logpth = simple_main(folder_suffix=qtitle)
+    for cx, sx in compressions.items():
+        CFG.sketch_compress_factor = sx
+        xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
+        print(xtitle)
+        if CFG.dataset == "CIFAR":
+            quantity = [1000, 100, 10, 1, 0]
+            for q in quantity:
+                CFG.dirichlet_alpha = q
+                qtitle = xtitle + f"/{q}_aleph/"
+                logpth = simple_main(folder_suffix=qtitle)
+                simple_test(logpth, model_list)
+        else:
+            logpth = simple_main()
             simple_test(logpth, model_list)
-    else:
-        logpth = simple_main()
-        simple_test(logpth, model_list)
