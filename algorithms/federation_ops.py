@@ -148,6 +148,7 @@ class SimpleΞFedAvg():
         model = model_copier(model_struct)
         if not gset: return model, {}
 
+        model = model_copier(gset["model"])
         ghatch = {}
 
         return model, ghatch
@@ -158,10 +159,13 @@ class SimpleΞFedAvg():
     def aggregate_globally(lsets): #used at begining of local round central
         """ Return: aggregated stat
         """
-        local_models = []
+        agg_model = model_copier(lsets[0]["model"])
+        local_states = []
         for ls in lsets:
-            local_models.append(model_copier(ls["model"]))
-        agg_model = global_average_weights(local_models)
+            local_states.append(ls["model"].state_dict())
+        agg_states = global_average_weights(local_states)
+
+        agg_model.load_state_dict(agg_states)
 
         gset = {"model": agg_model}
         return gset

@@ -336,9 +336,6 @@ def simple_main(model_key=None, folder_suffix=""):
     ### SETUP
     rutl.START_SEED()
     gpuid_generator = fedutl.gpu_devices_generator()
-    gpu_device = torch.device("cuda")
-    torch.cuda.device(gpu_device)
-    print("GPU device", gpu_device)
 
     # -- log path --
     if model_key: folder_suffix +=f"/{model_key}/"
@@ -357,7 +354,8 @@ def simple_main(model_key=None, folder_suffix=""):
     traindozers, validdozers = getDataLoaders(CFG, type="train")
 
     ### MODEL, OPTIM
-    global_model = getModel(model_key, gpu_device)
+    g_device = next(gpuid_generator)
+    global_model = getModel(model_key, g_device)
     lossfn = getLossFunc()
 
     fedClass = getFedClass()
@@ -416,11 +414,11 @@ def simple_main(model_key=None, folder_suffix=""):
             lmodel, agghatch = fedClass.desynopsize_local(fed_locals[id].local_model,
                                                            global_aggset)
             # ## cached use for faster run; above method is right/ logic-bugfree !!!!!
-            # lmodel, agghatch = global_model, global_agghatch
+            lmodel, agghatch = global_model, global_agghatch
 
             ## run one epoch
             if CFG.update_mode == "epoch":
-                if CFG.enable_weight_fedavg:
+                if CFG.enable_weight_reinit:
                     fed_locals[id].update_parameters(copy.deepcopy(lmodel), agghatch)
                 else: fed_locals[id].agghatch = agghatch
 
@@ -453,8 +451,8 @@ def simple_main(model_key=None, folder_suffix=""):
         global_model.eval()
         with torch.no_grad():
             for img, tgt in tqdm(validdozers["all"]):
-                img = img.to(gpu_device, non_blocking=True)
-                tgt = tgt.to(gpu_device, non_blocking=True)
+                img = img.to(g_device, non_blocking=True)
+                tgt = tgt.to(g_device, non_blocking=True)
                 pred, featp = global_model.forward(img)
                 loss, loss_info = lossfn(pred, tgt, featp, agghatch)
                 globalValidMetric.add_entry(torch.argmax(pred, dim=1),
@@ -559,23 +557,43 @@ def simple_test(saved_logpath, model_list=["global_model"]):
 if __name__ == '__main__':
 
 
-    model_list = ["global_model"]+[f"local_model_{i}"
-                                   for i in range(CFG.data_centers_count)]
+    def train_runner(model_key=None, folder_suffix=""):
+        """Simple trainer"""
+        test_model_list = ["global_model"]+[f"local_model_{i}"                  #==> Set as needed
+                                for i in range(CFG.data_centers_count)]
 
-    compressions = {#"1.5E": 8, #expand
-                    "2x": 24, "4x": 48, "8x": 96, "16x":198 }
+        logpth = simple_main(model_key=model_key, folder_suffix=folder_suffix)
+        simple_test(logpth, test_model_list)
 
-    for cx, sx in compressions.items():
-        CFG.sketch_compress_factor = sx
-        xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
-        print(xtitle)
+
+    def cifar_vs_rest_wrap(xtitle=""):
+        """For setting different alephs in cifar"""
         if CFG.dataset == "CIFAR":
-            quantity = [1000, 100, 10, 1, 0]
+            quantity = [ 1000, 0, 100, 1, 10]                                                     #==> Set as needed
+
             for q in quantity:
-                CFG.dirichlet_alpha = q
+                CFG.dirichlet_alpha = q  #~~~~
                 qtitle = xtitle + f"/{q}_aleph/"
-                logpth = simple_main(folder_suffix=qtitle)
-                simple_test(logpth, model_list)
+                train_runner(folder_suffix=qtitle)
         else:
-            logpth = simple_main()
-            simple_test(logpth, model_list)
+            train_runner()
+
+
+
+    def sketch_compressions_wrap():
+
+        compressions = {"1.5E": 8, #expand                                      #==> Set as needed
+                        # "2x": 24, "4x": 48, "8x": 96, "16x":198
+                        }
+
+        for cx, sx in compressions.items():
+            CFG.sketch_compress_factor = sx  #~~~~
+            xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
+            xtitle = ""
+            print(xtitle)
+            cifar_vs_rest_wrap(xtitle)
+
+    ###----------------------------------
+
+    cifar_vs_rest_wrap()
+    # sketch_compressions_wrap()
