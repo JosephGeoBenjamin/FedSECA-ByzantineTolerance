@@ -471,3 +471,70 @@ class CountSketchVec(object):
         print("in Summed", returnCSVec.table.shape )
 
         return returnCSVec
+
+
+
+class CountSketchVec_NoSignHash(CountSketchVec):
+    """"Change Log:
+    1. remove sign bits
+    2. add support for mean based retrival instead of median
+    """
+    retrive_func = "median"
+
+    def __init__(self, d, c, r, doInitialize=True, device=None,
+                 numBlocks=1, seed=42):
+        super().__init__( d, c, r, doInitialize, device, numBlocks, seed)
+        print("CountSketch NOSIGN hash class !!!!")
+
+    def accumulateVec(self, vec):
+        assert(len(vec.size()) == 1 and vec.size()[0] == self.d)
+        # the vector is sketched to each row independently
+        for r in range(self.r):
+            buckets = self.buckets[r,:].to(self.device)
+            # the main computation here is the bincount below, but
+            # there's lots of index accounitng leading up to it due
+            # to numBlocks being potentially > 1
+            for blockId in range(self.numBlocks):
+                start = blockId * buckets.size()[0]
+                end = (blockId + 1) * buckets.size()[0]
+                end = min(end, self.d)
+                offsetBuckets = buckets[:end-start].clone()
+                if self.numBlocks > 1:
+                    offsetBuckets += self.blockOffsets[blockId]
+                    offsetBuckets %= self.c
+                # bincount computes the sum of all values in the vector
+                # that correspond to each bucket
+                self.table[r,:] += torch.bincount(
+                                    input=offsetBuckets,
+                                    weights=vec[start:end],
+                                    minlength=self.c
+                                   )
+    def _findAllValues(self): #used in unsketch
+        if self.numBlocks == 1:
+            vals = torch.zeros(self.r, self.d, device=self.device)
+            for r in range(self.r):
+                vals[r] = self.table[r, self.buckets[r,:]]
+
+            if type(self).retrive_func == "mean":
+                out = vals.mean(dim=0)
+            else:
+                out = vals.median(dim=0)[0]
+            return out
+        else:
+            out = torch.zeros(self.d, device=self.device)
+            for blockId in range(self.numBlocks):
+                start = blockId * self.buckets.size()[1]
+                end = (blockId + 1) * self.buckets.size()[1]
+                end = min(end, self.d)
+                vals = torch.zeros(self.r, end-start, device=self.device)
+                for r in range(self.r):
+                    buckets = self.buckets[r, :end-start]
+                    offsetBuckets = buckets + self.blockOffsets[blockId]
+                    offsetBuckets %= self.c
+                    vals[r] = self.table[r, offsetBuckets]
+                if type(self).retrive_func == "mean":
+                    out[start:end] = vals.mean(dim=0)
+                else:
+                    out[start:end] = vals.median(dim=0)[0]
+
+            return out
