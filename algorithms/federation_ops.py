@@ -203,6 +203,8 @@ class NaiveΞCountSketch():
         self.csobj.zero()
         return lset
 
+    #-------- Shared methods ----------
+    # Strict Static
     @staticmethod #process global info for local use
     def desynopsize_local(model_struct, gset): #used at end of local round at each client
         """ model_struct: torch nn.module object
