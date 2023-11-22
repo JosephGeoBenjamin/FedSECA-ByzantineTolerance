@@ -2,10 +2,9 @@
 
 import copy
 import torch
-from torch import nn
 
+from sketching.count_sketch import CountSketchVec, CountSketchVec_NoSignHash
 
-from sketching.count_sketch import CountSketchVec
 
 ##------------------------------------------------------------------------------
 class MethodsΞTemplate():
@@ -23,6 +22,7 @@ class MethodsΞTemplate():
         lset = {}
         return lset
 
+    # Strict Static
     @staticmethod #process global info for local use
     def desynopsize_local(gset): #used at end of local round at each client
         """ Return: lstat
@@ -51,6 +51,7 @@ class MethodsΞTemplate():
 ## COMMONS
 
 def model_copier(m):
+    """might break the execution if changed"""
     return copy.deepcopy(m)
 
 
@@ -140,15 +141,17 @@ class SimpleΞFedAvg():
     #-------- Shared methods ----------
 
     @staticmethod #process global info for local use
-    def desynopsize_local(model_struct, gset): #used at end of local round at each client
+    def desynopsize_local(model_struct, gset, device=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
         """
+        if not device: device = next(model_struct.parameters()).device
+
         ## since no compression or sketching used
         model = model_copier(model_struct)
         if not gset: return model, {}
 
-        model = model_copier(gset["model"])
+        model = model_copier(gset["model"]).to(device)
         ghatch = {}
 
         return model, ghatch
@@ -156,9 +159,12 @@ class SimpleΞFedAvg():
     #-------- Server methods ----------
 
     @staticmethod  #Global calculation to send to locals
-    def aggregate_globally(lsets): #used at begining of local round central
+    def aggregate_globally(lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
+        if not device: device = next(lsets[-1]["model"].parameters()).device
+        for ls in lsets: ls["model"].to(device) #for nn.module .cuda is both inplace and assignable
+
         agg_model = model_copier(lsets[0]["model"])
         local_states = []
         for ls in lsets:
@@ -172,17 +178,20 @@ class SimpleΞFedAvg():
 
 ##==============================================================================
 
+SketchMethodVarient = CountSketchVec
+
 class NaiveΞCountSketch():
 
     #-------- Stateful variables Local ------
     def __init__(self, cfg, model, device="cpu"):
+        self.device = device
 
         vec_size = len(get_param_from_model(model))
         cols = vec_size // cfg.sketch_compress_factor
         rows = cfg.sketch_hashes
         print(vec_size, cols, rows)
 
-        self.csobj = CountSketchVec(d=vec_size, c=cols, r=rows, device=device)
+        self.csobj = SketchMethodVarient(d=vec_size, c=cols, r=rows, device=device)
 
 
     #-------- Client methods ----------
@@ -199,24 +208,26 @@ class NaiveΞCountSketch():
         param_vec = get_param_from_model(zxs["model"])
         self.csobj.accumulateVec(param_vec)
 
-        lset["sketch"] = model_copier(self.csobj)
+        lset["sketch"] = copy.deepcopy(self.csobj)
         self.csobj.zero()
         return lset
 
     #-------- Shared methods ----------
     # Strict Static
     @staticmethod #process global info for local use
-    def desynopsize_local(model_struct, gset): #used at end of local round at each client
+    def desynopsize_local(model_struct, gset, device=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"sketch", }
         """
+        if not device: device = next(model_struct.parameters()).device
+
         ## since no compression or sketching used
         model = model_copier(model_struct)
         if not gset: return model, {}
 
         us_params = gset["sketch"].unSketch(all=True)
 
-        model = set_param_in_model(model, us_params)
+        model = set_param_in_model(model, us_params.to(device))
 
         ghatch = {}
         return model, ghatch
@@ -231,14 +242,19 @@ class NaiveΞCountSketch():
     #-------- Server methods ----------
 
     @staticmethod  #Global calculation to send to locals
-    def aggregate_globally(lsets): #used at begining of local round central
+    def aggregate_globally(lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
-        agg_sketch = lsets[0]["sketch"]
+        if not device: device = lsets[-1]["sketch"].device
+        for ls in lsets: ls["sketch"].to_(device)
+
+        agg_sketch = copy.deepcopy(lsets[0]["sketch"])
         for ls in lsets[1:]:
             agg_sketch += ls["sketch"]
         agg_sketch = agg_sketch / len(lsets)
+
         gset = {"sketch": agg_sketch}
+        del lsets
         return gset
 
 
@@ -251,8 +267,8 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
     #-------- Stateful variables Local ------
     def __init__(self, cfg, model, device="cpu"):
         super().__init__(cfg, model, device)
-
-        self.model_tminus_1 = model
+        self.device = device
+        self.model_tminus_1 = model_copier(model).to(device)
 
     #-------- Client methods ----------
 
@@ -271,16 +287,19 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
 
         self.csobj.zero()
         self.model_tminus_1 = model_copier(zxs["model"])
+
         return lset
 
 
     #-------- Shared methods ----------
-
+    # Strict Static
     @staticmethod #process global info for local use
-    def desynopsize_local(model_struct, gset): #used at end of local round at each client
+    def desynopsize_local(model_struct, gset, device=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"sketch", }
         """
+        if not device: device = next(model_struct.parameters()).device
+
         ## since no compression or sketching used
         model = model_copier(model_struct)
         if not gset: return model, {}
@@ -288,7 +307,7 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         delta_us_params = gset["sketch"].unSketch(all=True)
         old_param_vec   = get_param_from_model(model_struct)
 
-        updated_param_vec = old_param_vec + delta_us_params
+        updated_param_vec = old_param_vec + delta_us_params.to(device)
 
         model = set_param_in_model(model, updated_param_vec)
 

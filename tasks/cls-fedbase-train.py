@@ -174,6 +174,8 @@ def getFedClass():
         fedClass = fedops.NaiveΞCountSketch
     elif CFG.fed_approach == "countsketch+deltaweight":
         fedClass = fedops.DeltaWeightΞCountSketch
+    elif CFG.fed_approach == "countsketch+fetchsgd":
+        fedClass = fedops.FetchSGDishΞCountSketch
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
     return fedClass
@@ -377,13 +379,13 @@ def simple_main(model_key=None, folder_suffix=""):
     global_aggset   = None   # synopsized aggregate form global
     fed_locals      = {}     # local Models hanger
     for id in traindozers.keys():
-        device = next(gpuid_generator)
+        l_device = next(gpuid_generator)
         fed_locals[id] = ClsFedHandler(id   = id,
                                 lossfunc    = lossfn,
                                 trainloader = traindozers[id],
                                 validloader = validdozers[id],
-                                fedobj      = fedClass(CFG, global_model, device),
-                                device      = device
+                                fedobj      = fedClass(CFG, copy.deepcopy(global_model), l_device),
+                                device      = l_device
                                 )
         fed_locals[id].update_parameters(copy.deepcopy(global_model),
                                          agghatch=agghatch)
@@ -414,7 +416,7 @@ def simple_main(model_key=None, folder_suffix=""):
             lmodel, agghatch = fedClass.desynopsize_local(fed_locals[id].local_model,
                                                            global_aggset)
             # ## cached use for faster run; above method is right/ logic-bugfree !!!!!
-            lmodel, agghatch = global_model, global_agghatch
+            # lmodel, agghatch = global_model, global_agghatch
 
             ## run one epoch
             if CFG.update_mode == "epoch":
@@ -427,10 +429,13 @@ def simple_main(model_key=None, folder_suffix=""):
 
             local_model_clues.append(fed_locals[id].fedobj.synopsize_local(lret))
 
-        global_aggset = fedClass.aggregate_globally(local_model_clues)
+        global_aggset = fedClass.aggregate_globally(local_model_clues, device=g_device)
 
         ## caching to global_object for analysis
-        global_model, global_agghatch = fedClass.desynopsize_local(global_model, global_aggset)
+        global_model, global_agghatch = fedClass.desynopsize_local(
+                                global_model, global_aggset, device=g_device)
+
+        print("HELLO WORLD !!!", global_model.state_dict())
 
         ## save checkpoint
         Gstep = (itr+1)/CFG.local_rounds if CFG.update_mode == "step" else itr

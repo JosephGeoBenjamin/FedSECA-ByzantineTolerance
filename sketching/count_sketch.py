@@ -173,13 +173,28 @@ class CountSketchVec(object):
         """ Set all the entries of the sketch to zero """
         self.table.zero_()
 
-    def cpu_(self):
-        self.device = "cpu"
-        self.table = self.table.cpu()
 
-    def cuda_(self, device="cuda"):
+    def to_(self, device): #for torch tensors
         self.device = device
-        self.table = self.table.cuda()
+        self.table = self.table.to(device)
+        self.buckets = self.buckets.to(self.device)
+        self.signs = self.signs.to(self.device)
+        if self.numBlocks > 1:
+            self.blockSigns   = self.blockSigns.to(self.device)
+            self.blockOffsets = self.blockOffsets.to(self.device)
+
+    def cpu_(self): #for torch tensors
+        self.to_("cpu")
+
+    def cuda_(self, device="cuda"): #for torch tensors
+        self.device = device
+        self.table = self.table.cuda(self.device)
+        self.buckets = self.buckets.cuda(self.device)
+        self.signs = self.signs.cuda(self.device)
+        if self.numBlocks > 1:
+            self.blockSigns   = self.blockSigns.cuda(self.device)
+            self.blockOffsets = self.blockOffsets.cuda(self.device)
+
 
     def half_(self):
         self.table = self.table.half()
@@ -210,6 +225,13 @@ class CountSketchVec(object):
         else:
             raise ValueError(f"Can't multiply a CSVec by {other}")
         return self
+
+
+    def __mul__(self, other):
+        returnCSVec = copy.deepcopy(self)
+        returnCSVec *= other
+        return returnCSVec
+
 
     def __truediv__(self, other):
         if isinstance(other, int) or isinstance(other, float):
