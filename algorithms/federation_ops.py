@@ -51,7 +51,7 @@ class MethodsΞTemplate():
 ## COMMONS
 
 def model_copier(m):
-    """might break the execution if changed"""
+    """a safer wrapper, to be enabled or disabled based on debug"""
     return copy.deepcopy(m)
 
 
@@ -148,7 +148,7 @@ class SimpleΞFedAvg():
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
-        model = model_copier(model_struct)
+        model = copy.deepcopy(model_struct)
         if not gset: return model, {}
 
         model = model_copier(gset["model"]).to(device)
@@ -178,7 +178,7 @@ class SimpleΞFedAvg():
 
 ##==============================================================================
 
-SketchMethodVarient = CountSketchVec
+SketchMethodVarient = CountSketchVec_NoSignHash
 
 class NaiveΞCountSketch():
 
@@ -193,6 +193,7 @@ class NaiveΞCountSketch():
 
         self.csobj = SketchMethodVarient(d=vec_size, c=cols, r=rows, device=device)
 
+        print("Naive Sketch implementation")
 
     #-------- Client methods ----------
 
@@ -222,7 +223,7 @@ class NaiveΞCountSketch():
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
-        model = model_copier(model_struct)
+        model = copy.deepcopy(model_struct)
         if not gset: return model, {}
 
         us_params = gset["sketch"].unSketch(all=True)
@@ -248,13 +249,13 @@ class NaiveΞCountSketch():
         if not device: device = lsets[-1]["sketch"].device
         for ls in lsets: ls["sketch"].to_(device)
 
-        agg_sketch = copy.deepcopy(lsets[0]["sketch"])
+        agg_sketch = model_copier(lsets[0]["sketch"])
         for ls in lsets[1:]:
             agg_sketch += ls["sketch"]
         agg_sketch = agg_sketch / len(lsets)
 
         gset = {"sketch": agg_sketch}
-        del lsets
+        # del lsets
         return gset
 
 
@@ -268,7 +269,9 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
     def __init__(self, cfg, model, device="cpu"):
         super().__init__(cfg, model, device)
         self.device = device
-        self.model_tminus_1 = model_copier(model).to(device)
+        self.model_tminus_1 = copy.deepcopy(model).to(device)
+
+        print("Delta Weight Sketch implementation")
 
     #-------- Client methods ----------
 
@@ -286,7 +289,7 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         lset["sketch"] = copy.deepcopy(self.csobj)
 
         self.csobj.zero()
-        self.model_tminus_1 = model_copier(zxs["model"])
+        self.model_tminus_1 = copy.deepcopy(zxs["model"])
 
         return lset
 
@@ -301,13 +304,13 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
-        model = model_copier(model_struct)
+        model = copy.deepcopy(model_struct)
         if not gset: return model, {}
 
         delta_us_params = gset["sketch"].unSketch(all=True)
-        old_param_vec   = get_param_from_model(model_struct)
+        param_vec   = get_param_from_model(model_struct)
 
-        updated_param_vec = old_param_vec + delta_us_params.to(device)
+        updated_param_vec = param_vec + delta_us_params.to(device)
 
         model = set_param_in_model(model, updated_param_vec)
 
@@ -315,3 +318,70 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         return model, ghatch
 
 
+class FetchSGDishΞCountSketch(DeltaWeightΞCountSketch):
+    """ Thin implementation on FetchSGD: https://arxiv.org/abs/2007.07682 """
+
+    #--------- Stateful variables Local -------
+    def __init__(self, cfg, model, device="cpu"):
+        super().__init__(cfg, model, device)
+
+        print("Fetch SGD implementation")
+
+    #--------- Server methods -----------
+
+    rho = 0.9
+    eta = 0.9
+    topk_ratio = 0.1
+    err_sketch = None
+    mom_sketch = None
+
+
+    @classmethod  #Global calculation to send to locals
+    def aggregate_globally(cls, lsets, device=None): #used at begining of local round central
+        """ Return: aggregated stat
+        """
+        if not device: device = lsets[-1]["sketch"].device
+        for ls in lsets: ls["sketch"].to_(device)
+
+        ## get adj_sketch, cls.err_sketch, cls.mom_sketch
+        adj_sketch = cls._setup_cls_sketches(lsets[-1]["sketch"])
+
+        ## sketches summation
+        agg_sketch = model_copier(lsets[0]["sketch"])
+        for ls in lsets[1:]:
+            agg_sketch += ls["sketch"]
+        agg_sketch = agg_sketch / len(lsets)
+
+        ## momentum term
+        cls.mom_sketch =  cls.mom_sketch * cls.rho + agg_sketch
+
+        ## topK unsketched delta vector
+        topk_count = int(cls.topk_ratio * agg_sketch.d)
+        tkuSv = (agg_sketch * cls.eta + cls.err_sketch).unSketch(k=topk_count)  ## if topk remove be mindful to subtract instead of zeroing
+        adj_sketch.accumulateVec(tkuSv)
+
+        ## error term
+        # cls.err_sketch = cls.eta*agg_sketch + cls.err_sketch - adj_sketch     ## -- In theory subtract
+
+        cls.err_sketch.table = torch.where(adj_sketch.table !=0,
+                                           0, cls.err_sketch.table)   ## -- practise  elements set to zero
+        cls.err_sketch = cls.mom_sketch * cls.eta + cls.err_sketch
+
+        gset = {"sketch": adj_sketch}
+        # del lsets
+        return gset
+
+    @classmethod
+    def _setup_cls_sketches(cls, proto_sketch):
+        if not torch.is_tensor(cls.err_sketch ):
+            cls.err_sketch = copy.deepcopy(proto_sketch)
+            cls.err_sketch.zero()
+        if not torch.is_tensor(cls.mom_sketch ):
+            cls.mom_sketch = copy.deepcopy(proto_sketch)
+            cls.mom_sketch.zero()
+        adj_sketch = copy.deepcopy(proto_sketch)
+        adj_sketch.zero()
+        return adj_sketch
+
+
+##******************************************************************************

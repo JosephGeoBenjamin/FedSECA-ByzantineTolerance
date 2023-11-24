@@ -167,18 +167,18 @@ def getModel(model_key=None, device="cpu"):
 
 ### ============================================================================
 
-def getFedClass():
+def getFedProtocol():
     if CFG.fed_approach == "fedavg":
-        fedClass = fedops.SimpleΞFedAvg
+        fedProto = fedops.SimpleΞFedAvg
     elif CFG.fed_approach == "countsketch":
-        fedClass = fedops.NaiveΞCountSketch
+        fedProto = fedops.NaiveΞCountSketch
     elif CFG.fed_approach == "countsketch+deltaweight":
-        fedClass = fedops.DeltaWeightΞCountSketch
+        fedProto = fedops.DeltaWeightΞCountSketch
     elif CFG.fed_approach == "countsketch+fetchsgd":
-        fedClass = fedops.FetchSGDishΞCountSketch
+        fedProto = fedops.FetchSGDishΞCountSketch
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
-    return fedClass
+    return fedProto
 
 
 def getLossFunc():
@@ -206,7 +206,7 @@ def getLossFunc():
 
 class ClsFedHandler(object):
     def __init__(self, trainloader, lossfunc, id=None,
-                 validloader=None, fedobj = None,
+                 validloader=None, fedproto_obj = None,
                  device="cuda"):
 
         self.id            = id
@@ -214,7 +214,7 @@ class ClsFedHandler(object):
         self.validloader   = validloader
         self.lossfunc      = lossfunc
         self.device        = device
-        self.fedobj        = fedobj
+        self.fedproto_obj        = fedproto_obj
 
         self.trainMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
@@ -315,8 +315,8 @@ class ClsFedHandler(object):
 
 
     def update_parameters(self, model, agghatch=None):
-        self.local_model = model.to(self.device)
-        self.local_optim = optim.AdamW(model.parameters(), lr=CFG.learning_rate,
+        self.local_model = copy.deepcopy(model).to(self.device)
+        self.local_optim = optim.AdamW(self.local_model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)
         self.local_scaler = torch.cuda.amp.GradScaler() # for mixed precision
 
@@ -360,7 +360,7 @@ def simple_main(model_key=None, folder_suffix=""):
     global_model = getModel(model_key, g_device)
     lossfn = getLossFunc()
 
-    fedClass = getFedClass()
+    fedProto = getFedProtocol()
 
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
@@ -384,11 +384,10 @@ def simple_main(model_key=None, folder_suffix=""):
                                 lossfunc    = lossfn,
                                 trainloader = traindozers[id],
                                 validloader = validdozers[id],
-                                fedobj      = fedClass(CFG, copy.deepcopy(global_model), l_device),
+                                fedproto_obj      = fedProto(CFG, global_model, l_device),
                                 device      = l_device
                                 )
-        fed_locals[id].update_parameters(copy.deepcopy(global_model),
-                                         agghatch=agghatch)
+        fed_locals[id].update_parameters(global_model, agghatch=agghatch) #deepcopies inside
 
 
     if not CFG.enable_weight_reinit: lutl.LOG2TXT(("&"*7)+" Forgoing FedAveraging Routine ....", CFG.gLogPath +'/misc.txt')
@@ -410,10 +409,10 @@ def simple_main(model_key=None, folder_suffix=""):
 
         ## ------ Training Routine ------
         local_model_clues = []
-        global_model.train()
+        # global_model.train()
 
         for id in  traindozers.keys():
-            lmodel, agghatch = fedClass.desynopsize_local(fed_locals[id].local_model,
+            lmodel, agghatch = fedProto.desynopsize_local(fed_locals[id].local_model,
                                                            global_aggset)
             # ## cached use for faster run; above method is right/ logic-bugfree !!!!!
             # lmodel, agghatch = global_model, global_agghatch
@@ -421,21 +420,20 @@ def simple_main(model_key=None, folder_suffix=""):
             ## run one epoch
             if CFG.update_mode == "epoch":
                 if CFG.enable_weight_reinit:
-                    fed_locals[id].update_parameters(copy.deepcopy(lmodel), agghatch)
+                    fed_locals[id].update_parameters(lmodel, agghatch) #deepcopies inside
                 else: fed_locals[id].agghatch = agghatch
 
                 lret = fed_locals[id].train_one_epoch(epoch = itr)
             else: raise Exception("Unknown Update Mode set")
 
-            local_model_clues.append(fed_locals[id].fedobj.synopsize_local(lret))
+            local_model_clues.append(fed_locals[id].fedproto_obj.synopsize_local(lret))
 
-        global_aggset = fedClass.aggregate_globally(local_model_clues, device=g_device)
+        global_aggset = fedProto.aggregate_globally(local_model_clues, device=g_device)
 
         ## caching to global_object for analysis
-        global_model, global_agghatch = fedClass.desynopsize_local(
+        global_model, global_agghatch = fedProto.desynopsize_local(
                                 global_model, global_aggset, device=g_device)
 
-        print("HELLO WORLD !!!", global_model.state_dict())
 
         ## save checkpoint
         Gstep = (itr+1)/CFG.local_rounds if CFG.update_mode == "step" else itr
@@ -574,7 +572,7 @@ if __name__ == '__main__':
     def cifar_vs_rest_wrap(xtitle=""):
         """For running different alephs in cifar"""
         if CFG.dataset == "CIFAR":
-            quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
+            quantity = [ 1000, 0, ] #100, 1, 10]                                   #==> Set as needed
 
             for q in quantity:
                 CFG.dirichlet_alpha = q  #~~~~
