@@ -237,10 +237,12 @@ class ClsFedHandler(object):
         if CFG.enable_fedprox:
             global_model_prox = copy.deepcopy(model)
 
+        startValidMetric = self.run_validation(model)
+
+        ### --------------
         if scheduler: scheduler.last_epoch = epoch
         stat_accum = {}; locstat = {}
         model.train()
-        ### ---------
 
         for step, (img, tgt) in tqdm(enumerate(self.trainloader,
                                             start=epoch*len(self.trainloader)
@@ -248,7 +250,7 @@ class ClsFedHandler(object):
                                         disable=CFG.disable_tqdm):
             img = img.to(self.device, non_blocking=True)
             tgt = tgt.to(self.device, non_blocking=True)
-            if img.shape[0] < CFG.batch_size: continue # fix last batch size being 1 issue
+            if img.shape[0] < 2: continue # fix last batch size being 1 issue
 
             optimizer.zero_grad()
             # with torch.cuda.amp.autocast():
@@ -267,19 +269,11 @@ class ClsFedHandler(object):
             # self.local_scaler.step(optimizer)
             # self.local_scaler.update()
             self.trainMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
-
         #end epoch
         if scheduler: scheduler.step()
+        ### --------------
 
-        model.eval()
-        with torch.no_grad():
-            for img, tgt in tqdm(self.validloader):
-                img = img.to(self.device, non_blocking=True)
-                tgt = tgt.to(self.device, non_blocking=True)
-                if img.shape[0] < 2: continue # fix last batch size being 1 issue
-                pred, featp = model.forward(img)
-                loss, loss_info = self.lossfunc(pred, tgt, featp, self.agghatch)
-                self.validMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
+        self.validMetric = self.run_validation(model)
 
         logs = dict(mode="Epoch-up", epoch=epoch, ID=self.id,
                     trainloss = self.trainMetric.get_loss(),
@@ -288,6 +282,9 @@ class ClsFedHandler(object):
                     validloss = self.validMetric.get_loss(),
                     validacc  = self.validMetric.get_balanced_accuracy(),
                     validF1   = self.validMetric.get_f1score(),
+                    stValidloss = startValidMetric.get_loss(),
+                    stValidacc  = startValidMetric.get_balanced_accuracy(),
+                    stValidF1   = startValidMetric.get_f1score(),
                     trainlossInfo = self.trainMetric.get_loss_info_aggregates(),
                     validlossInfo = self.validMetric.get_loss_info_aggregates(),
                     time=int(time.time()),)
@@ -310,8 +307,22 @@ class ClsFedHandler(object):
 
         self.trainMetric.reset()
         self.validMetric.reset()
-
         return { "model": copy.deepcopy(model)}
+
+
+    def run_validation(self, model, prefix=""):
+        tvalMetric = MultiClassMetrics(CFG.gLogPath+f"/metrics{prefix}/")
+        model.eval()
+        with torch.no_grad():
+            for img, tgt in tqdm(self.validloader):
+                img = img.to(self.device, non_blocking=True)
+                tgt = tgt.to(self.device, non_blocking=True)
+                if img.shape[0] < 2: continue # fix last batch size being 1 issue
+                pred, featp = model.forward(img)
+                loss, loss_info = self.lossfunc(pred, tgt, featp, self.agghatch)
+                tvalMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
+
+        return tvalMetric
 
 
     def update_parameters(self, model, agghatch=None):
@@ -432,7 +443,7 @@ def simple_main(model_key=None, folder_suffix=""):
 
         ## caching to global_object for analysis
         global_model, global_agghatch = global_fedprtcl.desynopsize_local(
-                                                global_aggset, device=g_device)
+                                                global_aggset, device=g_device,)
 
 
         ## save checkpoint
@@ -572,7 +583,7 @@ if __name__ == '__main__':
     def cifar_vs_rest_wrap(xtitle=""):
         """For running different alephs in cifar"""
         if CFG.dataset == "CIFAR":
-            quantity = [ 1000, 0, ] #100, 1, 10]                                   #==> Set as needed
+            quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
 
             for q in quantity:
                 CFG.dirichlet_alpha = q  #~~~~
@@ -597,6 +608,6 @@ if __name__ == '__main__':
             cifar_vs_rest_wrap(xtitle)
 
     ###----------------------------------
-
-    cifar_vs_rest_wrap()
+    train_runner()
+    # cifar_vs_rest_wrap()
     # sketch_compressions_wrap()

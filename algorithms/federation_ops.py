@@ -304,7 +304,7 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         """ model_struct: torch nn.module object
             gset: global aggregations {"sketch", }
         """
-        model_struct = self.model_t_ if not model_struct else model_struct
+        model_struct = self.model_0th if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
