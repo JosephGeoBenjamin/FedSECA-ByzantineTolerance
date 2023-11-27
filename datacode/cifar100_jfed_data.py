@@ -63,8 +63,11 @@ class Cifar100_JFedDataset(torch.utils.data.Dataset):
         self.pooled = True if center == "all" else False
 
         if not self.pooled:
-            df2["center"] = df2[f"{dirichlet_alpha}_alpha_id"].apply(self._remap_values)
-            df2 = df2[df2["center"] == center]
+            if dirichlet_alpha:
+                df2["center"] = df2[f"{dirichlet_alpha}_alpha_id"].apply(self._remap_values)
+                df2 = df2[df2["center"] == center]
+            else:
+                df2["center"] = np.random.randint(0, self.total_centers, size=len(df2))
 
         self.df2     = df2.reset_index()
         self.targets = list(self.df2[label_type])
