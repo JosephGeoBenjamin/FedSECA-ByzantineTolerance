@@ -169,16 +169,16 @@ def getModel(model_key=None, device="cpu"):
 
 def getFedProtocol():
     if CFG.fed_approach == "fedavg":
-        fedProto = fedops.SimpleΞFedAvg
+        fedProtocol = fedops.SimpleΞFedAvg
     elif CFG.fed_approach == "countsketch":
-        fedProto = fedops.NaiveΞCountSketch
+        fedProtocol = fedops.NaiveΞCountSketch
     elif CFG.fed_approach == "countsketch+deltaweight":
-        fedProto = fedops.DeltaWeightΞCountSketch
+        fedProtocol = fedops.DeltaWeightΞCountSketch
     elif CFG.fed_approach == "countsketch+fetchsgd":
-        fedProto = fedops.FetchSGDishΞCountSketch
+        fedProtocol = fedops.FetchSGDishΞCountSketch
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
-    return fedProto
+    return fedProtocol
 
 
 def getLossFunc():
@@ -206,7 +206,7 @@ def getLossFunc():
 
 class ClsFedHandler(object):
     def __init__(self, trainloader, lossfunc, id=None,
-                 validloader=None, fedproto_obj = None,
+                 validloader=None, fedprtcl = None,
                  device="cuda"):
 
         self.id            = id
@@ -214,7 +214,7 @@ class ClsFedHandler(object):
         self.validloader   = validloader
         self.lossfunc      = lossfunc
         self.device        = device
-        self.fedproto_obj        = fedproto_obj
+        self.fedprtcl        = fedprtcl
 
         self.trainMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
@@ -360,7 +360,7 @@ def simple_main(model_key=None, folder_suffix=""):
     global_model = getModel(model_key, g_device)
     lossfn = getLossFunc()
 
-    fedProto = getFedProtocol()
+    fedProtocol = getFedProtocol()
 
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
@@ -377,6 +377,7 @@ def simple_main(model_key=None, folder_suffix=""):
     agghatch        = None   # expanded/desynopsized information w.r.t local model
     global_agghatch = None   # expanded information w.r.t global model
     global_aggset   = None   # synopsized aggregate form global
+    global_fedprtcl = fedProtocol(CFG, global_model, g_device)
     fed_locals      = {}     # local Models hanger
     for id in traindozers.keys():
         l_device = next(gpuid_generator)
@@ -384,7 +385,7 @@ def simple_main(model_key=None, folder_suffix=""):
                                 lossfunc    = lossfn,
                                 trainloader = traindozers[id],
                                 validloader = validdozers[id],
-                                fedproto_obj      = fedProto(CFG, global_model, l_device),
+                                fedprtcl    = fedProtocol(CFG, global_model, l_device),
                                 device      = l_device
                                 )
         fed_locals[id].update_parameters(global_model, agghatch=agghatch) #deepcopies inside
@@ -412,8 +413,7 @@ def simple_main(model_key=None, folder_suffix=""):
         # global_model.train()
 
         for id in  traindozers.keys():
-            lmodel, agghatch = fedProto.desynopsize_local(fed_locals[id].local_model,
-                                                           global_aggset)
+            lmodel, agghatch = fed_locals[id].fedprtcl.desynopsize_local(global_aggset)
             # ## cached use for faster run; above method is right/ logic-bugfree !!!!!
             # lmodel, agghatch = global_model, global_agghatch
 
@@ -426,13 +426,13 @@ def simple_main(model_key=None, folder_suffix=""):
                 lret = fed_locals[id].train_one_epoch(epoch = itr)
             else: raise Exception("Unknown Update Mode set")
 
-            local_model_clues.append(fed_locals[id].fedproto_obj.synopsize_local(lret))
+            local_model_clues.append(fed_locals[id].fedprtcl.synopsize_local(lret))
 
-        global_aggset = fedProto.aggregate_globally(local_model_clues, device=g_device)
+        global_aggset = fedProtocol.aggregate_globally(local_model_clues, device=g_device)
 
         ## caching to global_object for analysis
-        global_model, global_agghatch = fedProto.desynopsize_local(
-                                global_model, global_aggset, device=g_device)
+        global_model, global_agghatch = global_fedprtcl.desynopsize_local(
+                                                global_aggset, device=g_device)
 
 
         ## save checkpoint

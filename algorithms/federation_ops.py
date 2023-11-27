@@ -116,7 +116,7 @@ def set_param_in_model(model, param_vec):
 class SimpleΞFedAvg():
 
     def __init__(self, cfg, model, device="cpu"):
-        pass
+        self.model_0th = copy.deepcopy(model)
 
     #-------- Client methods ----------
     # @instancemethod  # Local info aggregation Locally
@@ -131,20 +131,14 @@ class SimpleΞFedAvg():
         lset["model"] = model_copier(zxs["model"])
         return lset
 
-    @staticmethod #
-    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
-        """
-        """
-        loss, print_info = torch.tensor(0), {}
-        return loss, print_info
-
     #-------- Shared methods ----------
 
-    @staticmethod #process global info for local use
-    def desynopsize_local(model_struct, gset, device=None): #used at end of local round at each client
+    # @instancemethod #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
         """
+        model_struct = self.model_0th if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
@@ -155,6 +149,15 @@ class SimpleΞFedAvg():
         ghatch = {}
 
         return model, ghatch
+
+
+    @staticmethod #
+    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
+        """
+        """
+        loss, print_info = torch.tensor(0), {}
+        return loss, print_info
+
 
     #-------- Server methods ----------
 
@@ -178,13 +181,14 @@ class SimpleΞFedAvg():
 
 ##==============================================================================
 
-SketchMethodVarient = CountSketchVec_NoSignHash
+SketchMethodVarient = CountSketchVec
 
 class NaiveΞCountSketch():
 
     #-------- Stateful variables Local ------
     def __init__(self, cfg, model, device="cpu"):
         self.device = device
+        self.model_0th = copy.deepcopy(model)
 
         vec_size = len(get_param_from_model(model))
         cols = vec_size // cfg.sketch_compress_factor
@@ -214,12 +218,12 @@ class NaiveΞCountSketch():
         return lset
 
     #-------- Shared methods ----------
-    # Strict Static
-    @staticmethod #process global info for local use
-    def desynopsize_local(model_struct, gset, device=None): #used at end of local round at each client
+    # @instancemethod #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"sketch", }
         """
+        model_struct = self.model_0th if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
@@ -269,6 +273,7 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
     def __init__(self, cfg, model, device="cpu"):
         super().__init__(cfg, model, device)
         self.device = device
+        self.model_0th      = copy.deepcopy(model).to(device)
         self.model_tminus_1 = copy.deepcopy(model).to(device)
 
         print("Delta Weight Sketch implementation")
@@ -289,18 +294,17 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         lset["sketch"] = copy.deepcopy(self.csobj)
 
         self.csobj.zero()
-        self.model_tminus_1 = copy.deepcopy(zxs["model"])
 
         return lset
 
 
     #-------- Shared methods ----------
-    # Strict Static
-    @staticmethod #process global info for local use
-    def desynopsize_local(model_struct, gset, device=None): #used at end of local round at each client
+    # @instancemethod  #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"sketch", }
         """
+        model_struct = self.model_t_ if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
@@ -308,12 +312,13 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         if not gset: return model, {}
 
         delta_us_params = gset["sketch"].unSketch(all=True)
-        param_vec   = get_param_from_model(model_struct)
+        param_vec   = get_param_from_model(self.model_tminus_1)
 
         updated_param_vec = param_vec + delta_us_params.to(device)
 
         model = set_param_in_model(model, updated_param_vec)
 
+        self.model_tminus_1 = copy.deepcopy(model)
         ghatch = {}
         return model, ghatch
 
