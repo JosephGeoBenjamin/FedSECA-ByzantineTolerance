@@ -22,24 +22,23 @@ class MethodsΞTemplate():
         lset = {}
         return lset
 
-    # Strict Static
-    @staticmethod #process global info for local use
-    def desynopsize_local(gset): #used at end of local round at each client
+    # @instancemethod  #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
         """ Return: lstat
         """
         dgset = {}
         return dgset
 
     @staticmethod #
-    def compute_local_deviation(lset, gset, cen_id=None): #at each client
+    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
         """
         """
         loss, print_info = torch.tensor(0), {}
         return loss, print_info
 
 
-    @staticmethod  #Global calculation to send to locals
-    def aggregate_globally(lsets): #used at begining of local round central
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
         gset = {}
@@ -129,6 +128,7 @@ class SimpleΞFedAvg():
         """
         lset = {}
         lset["model"] = model_copier(zxs["model"])
+
         return lset
 
     #-------- Shared methods ----------
@@ -161,8 +161,8 @@ class SimpleΞFedAvg():
 
     #-------- Server methods ----------
 
-    @staticmethod  #Global calculation to send to locals
-    def aggregate_globally(lsets, device=None): #used at begining of local round central
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
         if not device: device = next(lsets[-1]["model"].parameters()).device
@@ -246,8 +246,8 @@ class NaiveΞCountSketch():
 
     #-------- Server methods ----------
 
-    @staticmethod  #Global calculation to send to locals
-    def aggregate_globally(lsets, device=None): #used at begining of local round central
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
         if not device: device = lsets[-1]["sketch"].device
@@ -420,26 +420,25 @@ class FetchSGDishΞCountSketch(DeltaWeightΞCountSketch):
     def __init__(self, cfg, model, device="cpu"):
         super().__init__(cfg, model, device)
 
+        self.rho = 0.9
+        self.eta = 0.9
+        self.topk_ratio = 0.1
+        self.err_sketch = None
+        self.mom_sketch = None
+
         print("Fetch SGD implementation")
 
     #--------- Server methods -----------
 
-    rho = 0.9
-    eta = 0.9
-    topk_ratio = 0.1
-    err_sketch = None
-    mom_sketch = None
-
-
-    @classmethod  #Global calculation to send to locals
-    def aggregate_globally(cls, lsets, device=None): #used at begining of local round central
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
         if not device: device = lsets[-1]["sketch"].device
         for ls in lsets: ls["sketch"].to_(device)
 
-        ## get adj_sketch, cls.err_sketch, cls.mom_sketch
-        adj_sketch = cls._setup_cls_sketches(lsets[-1]["sketch"])
+        ## get adj_sketch, self.err_sketch, self.mom_sketch
+        adj_sketch = self._setup_cls_sketches(lsets[-1]["sketch"])
 
         ## sketches summation
         agg_sketch = model_copier(lsets[0]["sketch"])
@@ -448,32 +447,33 @@ class FetchSGDishΞCountSketch(DeltaWeightΞCountSketch):
         agg_sketch = agg_sketch / len(lsets)
 
         ## momentum term
-        cls.mom_sketch =  cls.mom_sketch * cls.rho + agg_sketch
+        self.mom_sketch =  self.mom_sketch * self.rho + agg_sketch
 
         ## topK unsketched delta vector
-        topk_count = int(cls.topk_ratio * agg_sketch.d)
-        tkuSv = (agg_sketch * cls.eta + cls.err_sketch).unSketch(k=topk_count)  ## if topk remove be mindful to subtract instead of zeroing
+        topk_count = int(self.topk_ratio * agg_sketch.d)
+        tkuSv = (agg_sketch * self.eta + self.err_sketch).unSketch(k=topk_count)  ## if topk remove be mindful to subtract instead of zeroing
         adj_sketch.accumulateVec(tkuSv)
 
         ## error term
-        # cls.err_sketch = cls.eta*agg_sketch + cls.err_sketch - adj_sketch     ## -- In theory subtract
+        # self.err_sketch = self.eta*agg_sketch + self.err_sketch - adj_sketch     ## -- In theory subtract
 
-        cls.err_sketch.table = torch.where(adj_sketch.table !=0,
-                                           0, cls.err_sketch.table)   ## -- practise  elements set to zero
-        cls.err_sketch = cls.mom_sketch * cls.eta + cls.err_sketch
+        self.err_sketch.table = torch.where(adj_sketch.table !=0,
+                                           0, self.err_sketch.table)   ## -- practise  elements set to zero
+        self.err_sketch = self.mom_sketch * self.eta + self.err_sketch
 
         gset = {"sketch": adj_sketch}
         # del lsets
         return gset
 
     @classmethod
-    def _setup_cls_sketches(cls, proto_sketch):
-        if not torch.is_tensor(cls.err_sketch ):
-            cls.err_sketch = copy.deepcopy(proto_sketch)
-            cls.err_sketch.zero()
-        if not torch.is_tensor(cls.mom_sketch ):
-            cls.mom_sketch = copy.deepcopy(proto_sketch)
-            cls.mom_sketch.zero()
+    def _setup_cls_sketches(self, proto_sketch):
+
+        if not torch.is_tensor(self.err_sketch ):
+            self.err_sketch = copy.deepcopy(proto_sketch)
+            self.err_sketch.zero()
+        if not torch.is_tensor(self.mom_sketch ):
+            self.mom_sketch = copy.deepcopy(proto_sketch)
+            self.mom_sketch.zero()
         adj_sketch = copy.deepcopy(proto_sketch)
         adj_sketch.zero()
         return adj_sketch
