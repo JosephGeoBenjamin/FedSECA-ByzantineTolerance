@@ -323,6 +323,96 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         return model, ghatch
 
 
+class DeltaWeightBNΞCountSketch(NaiveΞCountSketch):
+    """ DeltaWeightBNΞCountSketch
+        Local and Global are expected to be Decoupled from each other
+        since no direct averaing update is observed
+    """
+
+    #-------- Stateful variables Local ------
+    def __init__(self, cfg, model, device="cpu"):
+        super().__init__(cfg, model, device)
+        self.device = device
+        self.model_0th      = copy.deepcopy(model).to(device)
+        self.model_tminus_1 = copy.deepcopy(model).to(device)
+
+        print("Delta Weight Sketch implementation")
+
+    def get_bn_params(self, model):
+        m1state = model.state_dict()
+        bn_states = {}
+        for k in m1state:
+            if ".bn" in k:
+                bn_states[k] = m1state[k]
+        return bn_states
+
+
+    #-------- Client methods ----------
+
+    # @instancemethod #Locals calculation to send to Global
+    def synopsize_local(self, zxs): #used at end of local round at each client
+        """ zxs: {"model", }
+        """
+        lset = {}
+        old_param_vec = get_param_from_model(self.model_tminus_1)
+        new_param_vec = get_param_from_model(zxs["model"])
+
+        delta_param_vec = new_param_vec - old_param_vec
+        self.csobj.accumulateVec(delta_param_vec)
+
+        lset["sketch"] = copy.deepcopy(self.csobj)
+        lset["BN"] = self.get_bn_params(zxs["model"])
+        self.csobj.zero()
+
+        return lset
+
+
+    #-------- Shared methods ----------
+    # @instancemethod  #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
+        """ model_struct: torch nn.module object
+            gset: global aggregations {"sketch", }
+        """
+        model_struct = self.model_0th if not model_struct else model_struct
+        if not device: device = next(model_struct.parameters()).device
+
+        ## since no compression or sketching used
+        model = copy.deepcopy(model_struct)
+        if not gset: return model, {}
+
+        delta_us_params = gset["sketch"].unSketch(all=True)
+        param_vec   = get_param_from_model(self.model_tminus_1)
+
+        updated_param_vec = param_vec + delta_us_params.to(device)
+
+        model = set_param_in_model(model, updated_param_vec)
+
+        new_state = model.state_dict()
+        new_state.update(gset["BN"])
+        model.load_state_dict(new_state)
+
+        self.model_tminus_1 = copy.deepcopy(model)
+        ghatch = {}
+        return model, ghatch
+
+
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
+        """ Return: aggregated stat
+        """
+        if not device: device = lsets[-1]["sketch"].device
+        for ls in lsets: ls["sketch"].to_(device)
+
+        agg_sketch = model_copier(lsets[0]["sketch"])
+        for ls in lsets[1:]:
+            agg_sketch += ls["sketch"]
+        agg_sketch = agg_sketch / len(lsets)
+
+        gset = {"sketch": agg_sketch}
+        gset["BN"] = global_average_weights([l['BN'] for l in lsets], device=device)
+        # del lsets
+        return gset
+
 class FetchSGDishΞCountSketch(DeltaWeightΞCountSketch):
     """ Thin implementation on FetchSGD: https://arxiv.org/abs/2007.07682 """
 

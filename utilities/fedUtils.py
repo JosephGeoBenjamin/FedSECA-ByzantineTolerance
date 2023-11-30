@@ -12,3 +12,20 @@ def gpu_devices_generator():
     while True:
         yield gpu_devices[index]
         index = (index + 1) % len(gpu_devices)
+
+
+
+def find_layerwise_weight_difference(m1, m2):
+    """ L2 Norm
+    """
+    m1state = m1.state_dict()
+    m2state = m2.state_dict()
+    layerwise = {}
+    for k in m1state:
+        try:
+            er = torch.norm(m1state[k] - m2state[k], p=2)
+        except:
+            er = torch.tensor(-1.0)
+        layerwise[k] = er.item()
+
+    return layerwise
