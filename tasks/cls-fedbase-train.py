@@ -439,7 +439,7 @@ def simple_main(model_key=None, folder_suffix=""):
 
             local_model_clues.append(fed_locals[id].fedprtcl.synopsize_local(lret))
 
-        global_aggset = fedProtocol.aggregate_globally(local_model_clues, device=g_device)
+        global_aggset = global_fedprtcl.aggregate_globally(local_model_clues, device=g_device)
 
         ## caching to global_object for analysis
         global_model, global_agghatch = global_fedprtcl.desynopsize_local(

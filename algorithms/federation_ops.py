@@ -68,10 +68,10 @@ def global_average_weights(w:list, device = "cpu"):
     return w_avg
 
 
-def get_param_from_model(model:torch.nn.Module):
+def get_param_from_model(model:torch.nn.Module, only_with_grad=False):
     param_vec = []
     for p in model.parameters():
-        if p.requires_grad:
+        if ( not only_with_grad) or p.requires_grad:
             param_vec.append(p.data.view(-1).float())
     return torch.cat(param_vec)
 
@@ -98,10 +98,10 @@ def get_topK_param(model, K):
     return out_vec
 
 
-def set_param_in_model(model, param_vec):
+def set_param_in_model(model, param_vec, only_with_grad=False):
     start = 0
     for p in model.parameters():
-        if p.requires_grad:
+        if ( not only_with_grad) or p.requires_grad:
             end = start + p.numel()
             p.data.zero_()
             p.data.add_(param_vec[start:end].view(p.size()))
@@ -262,6 +262,7 @@ class NaiveΞCountSketch():
         # del lsets
         return gset
 
+##------------------------------------------------------------------------------
 
 class DeltaWeightΞCountSketch(NaiveΞCountSketch):
     """ DeltaWeightΞCountSketch
@@ -322,6 +323,7 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
         ghatch = {}
         return model, ghatch
 
+##------------------------------------------------------------------------------
 
 class DeltaWeightBNΞCountSketch(NaiveΞCountSketch):
     """ DeltaWeightBNΞCountSketch
@@ -412,6 +414,8 @@ class DeltaWeightBNΞCountSketch(NaiveΞCountSketch):
         gset["BN"] = global_average_weights([l['BN'] for l in lsets], device=device)
         # del lsets
         return gset
+
+##------------------------------------------------------------------------------
 
 class FetchSGDishΞCountSketch(DeltaWeightΞCountSketch):
     """ Thin implementation on FetchSGD: https://arxiv.org/abs/2007.07682 """
