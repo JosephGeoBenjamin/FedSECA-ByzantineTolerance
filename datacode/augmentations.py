@@ -181,3 +181,12 @@ class OrganMnistClassifyAuguments:
 
     def get_composition(self):
         return str(self.transform_main)
+
+
+##====================== Humble (MNIST) Transforms =============================
+
+
+HumbleTransforms = torch_transforms.Compose([
+    torch_transforms.transforms.ToTensor(),
+    torch_transforms.transforms.Normalize((0.5,), (0.5,))
+])
