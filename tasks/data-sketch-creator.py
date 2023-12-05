@@ -14,6 +14,7 @@ import utilities.runUtils as rutl
 import utilities.logUtils as lutl
 
 from sketching.count_sketch import CountSketchVec
+from sketching.race_sketch import RaceSketchVec
 
 
 print(f"Pytorch version: {torch.__version__}")
@@ -64,6 +65,21 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
                         split_type = split_type,
                         transforms=OrganMnistClassifyAuguments(method="infer",
                                                         image_size=img_size_in))
+
+    elif cfg.dataset ==  "MNIST":
+        from datacode.humble_jfed_data import MNISTkind_JFedDatset
+        from datacode.augmentations import HumbleTransforms
+
+        traindataset = MNISTkind_JFedDatset(data_path  = cfg.data_path,
+                                    dataset_type  ='MNIST',
+                                    split_type    = split_type,
+                                    center        = center_index,
+                                    total_centers = cfg.data_centers_count,
+                                    iid_ness      = cfg.iid_ness,
+                                    semi_client_per_class = 2,
+                                    transform=HumbleTransforms
+                                    )
+
     else:
         raise ValueError(f"Unsupported data type specfied {cfg.dataset}")
 
@@ -95,14 +111,18 @@ class ModelFeatureAgg():
         res = self.featp_holder / self.counter
         return res.detach().cpu().numpy()
 
-class ImageSketching():
-    def __init__(self, img_size, device="cuda") -> None:
+class Image_CountSketching():
+    def __init__(self, img_size,
+                 channels = 3,
+                 device="cuda") -> None:
 
-        self.csobj = CountSketchVec(d=img_size*img_size *3, c=2**13, r=16, device=device)
+        cols = 2 ** ( int.bit_length(img_size**2 - 1) -2)
+        self.csobj = CountSketchVec(d=img_size*img_size*channels, c=cols, r=16, device=device)
         self.counter = 0
 
     def accum_one_sample(self,x):
-        self.csobj.accumulateVec(x.flatten())
+        x = x.flatten()
+        self.csobj.accumulateVec(x)
         self.counter+=1
 
     def get_full_aggregate(self):
@@ -110,7 +130,7 @@ class ImageSketching():
         return res.detach().cpu().numpy()
 
 
-class FeatureSketching():
+class Feature_CountSketching():
 
     def __init__(self, img_size, device="cuda") -> None:
 
@@ -136,10 +156,13 @@ class FeatureSketching():
 
 def getSketcher(cfg):
     img_size = cfg.image_size
+    channels = 3 if not cfg.channels else cfg.channels
     sketcher_dict = {
         "feature-only": ModelFeatureAgg(),
-        "image-sketch": ImageSketching(img_size, device="cuda"),
-        "feature-sketch": FeatureSketching(img_size, device="cuda"),
+        "image-CountSketch": Image_CountSketching(img_size, channels=channels,device="cuda"),
+        "feature-CountSketch": Feature_CountSketching(img_size, device="cuda"),
+        "imagepix-RaceSketch": ImagePix_RaceSketching(img_size, device="cuda"),
+
     }
     return sketcher_dict[cfg.sketch_method]
 
@@ -163,13 +186,20 @@ def data_sketch_main(cfg, file_suffix=""):
     center_list = list(range(cfg.data_centers_count))+["all"]
 
     for center_index in center_list:
+        laoder_list = []
         trainloader = getAdataloader(cfg, center_index, split_type="cls_train")
-        validloader = getAdataloader(cfg, center_index, split_type="cls_valid")
+        laoder_list.append(trainloader)
+
+        if not cfg.disable_validation:
+            validloader = getAdataloader(cfg, center_index, split_type="cls_valid")
+            laoder_list.append(validloader)
+
+
 
         sketcher = getSketcher(cfg)
 
         with torch.no_grad():
-            for laoder in [trainloader, validloader]:
+            for laoder in laoder_list:
                 for img, _ in tqdm(laoder):
                     img = img.to(gpu_device, non_blocking=True)
                     sketcher.accum_one_sample(img)
@@ -216,13 +246,27 @@ def run_for_organmnist():
     data_sketch_main(CFG)
 
 
+def run_for_mnist():
+    CFG.dataset   = "MNIST"
+    CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/torch-data/"
+    CFG.data_centers_count = 5
+    CFG.image_size = 28
+    CFG.channels   = 1
+    CFG.disable_validation = True
+
+    for alp in ["non", "full", "semi"]:
+            CFG.iid_ness = alp
+            data_sketch_main(CFG, file_suffix=f"{alp}-")
+
+
 
 if __name__ == '__main__':
-    CFG.sketch_method = "feature-only"
-    # CFG.sketch_method = "feature-sketch"
-    # CFG.sketch_method = "image-sketch"
+    # CFG.sketch_method = "feature-only"
+    # CFG.sketch_method = "feature-CountSketch"
+    CFG.sketch_method = "image-CountSketch"
+    # CFG.sketch_method = "imagepix-RaceSketch"
 
-    run_for_isicflamby()
+    run_for_mnist()
 
 
 

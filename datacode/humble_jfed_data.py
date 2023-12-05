@@ -2,7 +2,7 @@ import torch
 import torchvision
 import itertools
 
-from augmentations import HumbleTransforms
+from datacode.augmentations import HumbleTransforms
 
 
 
@@ -33,7 +33,9 @@ class MNISTkind_JFedDatset(torch.utils.data.Dataset):
         self.center = center
         self.total_centers = total_centers
         self.transform = transform
-        self.train = True if split_type == "cls_train" else False
+        if   split_type == "cls_train": self.train = True
+        elif split_type == "cls_test" : self.train = False
+        else: raise Exception(f"Unknown Split type specified, {split_type}")
 
         if dataset_type == "MNIST":
             self.full_dataset = torchvision.datasets.MNIST(root=data_path,
