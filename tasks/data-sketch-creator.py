@@ -24,7 +24,7 @@ print(f"cuda version: {torch.version.cuda}")
 
 CFG = rutl.ObjDict(
 
-checkpoint_dir= "hypotheses/DataSketchColl/trail-001/",
+checkpoint_dir= "hypotheses/DataSketchColl/trail-002/",
 )
 
 ### ----------------------------------------------------------------------------
@@ -118,7 +118,7 @@ class ModelFeatureMean():
         self.counter = 0
         self.featp_holder = torch.zeros(512).to(device)
 
-    def accum_one_sample(self,x):
+    def accum_one_sample(self,x, _):
         featp = self.model.forward(x)
         self.featp_holder += featp.flatten()
         self.counter+=1
@@ -140,7 +140,7 @@ class ModelFeatureCovariance():
         self.counter = 0
         self.featp_holder = []
 
-    def accum_one_sample(self,x):
+    def accum_one_sample(self,x, _):
         featp = self.model.forward(x)
         self.featp_holder.append(featp.flatten())
         self.counter+=1
@@ -159,6 +159,83 @@ class ModelFeatureCovariance():
 
 
 
+class ModelFeatureGaussDistribution():
+    def __init__(self, weight_path=None, classwise=False ,device="cuda") -> None:
+        self.model = torchvision.models.resnet18(weights="DEFAULT")
+        self.model = self.model.to(device)
+        self.model.fc = torch.nn.Identity()
+
+        if weight_path: self.model = pretrained_weight_loader(self.model, weight_path)
+
+        self.model.eval()
+        self.classwise = classwise
+        self.counter = 0
+        self.full_featp_holder = []
+        self.class_featp_holder = {}
+
+
+    def _add_feature_to_dict(self, z, c):
+        c = c.item()
+        if c in self.class_featp_holder.keys():
+            self.class_featp_holder[c].append(z)
+        else:
+            self.class_featp_holder[c] = [z]
+
+
+    def accum_one_sample(self, x, c):
+        featp = self.model.forward(x)
+        if self.classwise: self._add_feature_to_dict(featp.flatten(), c)
+        else: self.full_featp_holder.append(featp.flatten())
+
+        self.counter+=1
+
+
+    def _find_mean_cov(self,featp_list):
+
+        num_features = 512
+        featp_NxD = torch.stack(featp_list)
+        print(featp_NxD.shape)
+
+        mean = torch.mean(featp_NxD, dim=0)
+        cov = torch.cov(featp_NxD.T)  #torch.cov rows are the variables and columns are the observations
+        print(mean.shape, cov.shape)
+        return mean.detach().cpu().numpy(), cov.detach().cpu().numpy()
+
+
+    def get_full_aggregate(self):
+
+        if self.classwise:
+            mean_list = []; cov_list = []; walpha_list = []
+            for c in self.class_featp_holder:
+                c_mean, c_cov = self._find_mean_cov(self.class_featp_holder[c])
+                c_walpha = len(self.class_featp_holder[c]) / self.counter
+                cov_list.append(c_cov)
+                mean_list.append(c_mean)
+                walpha_list.append(c_walpha)
+            data_points = self._generate_mixture_of_gaussians(mean_list, cov_list, walpha_list, 1000)
+
+        else:
+            f_mean, f_cov = self._find_mean_cov(self.full_featp_holder)
+            data_points = np.random.multivariate_normal(f_mean, f_cov, 5000)
+
+        return data_points
+
+    def _generate_mixture_of_gaussians(self,  means_list, covs_list, walphas_list, num_points):
+
+        num_components = len(means_list)
+        component_indices = np.random.choice(num_components, size=num_points, p=walphas_list)
+
+        data_points = np.zeros((num_points, len(means_list[0])))
+
+        for i in range(num_components):
+            component_mask = (component_indices == i)
+            num_samples = np.sum(component_mask)
+            data_points[component_mask] = np.random.multivariate_normal(
+                    means_list[i], covs_list[i], num_samples)
+
+        return data_points
+
+
 class Image_Histogram():
     def __init__(self, img_size,
                  channels = 3,
@@ -170,7 +247,7 @@ class Image_Histogram():
         self.counter = 0
         assert (channels == 3), "channels other than 3 logic Not handled"
 
-    def accum_one_sample(self,x):
+    def accum_one_sample(self,x, _):
         R_hist = torch.histc(x[:,0,:,:].flatten(), bins=256, min=-1, max=1)
         G_hist = torch.histc(x[:,1,:,:].flatten(), bins=256, min=-1, max=1)
         B_hist = torch.histc(x[:,2,:,:].flatten(), bins=256, min=-1, max=1)
@@ -195,7 +272,7 @@ class Image_CountSketching():
         self.csobj = CountSketchVec(d=img_size*img_size*channels, c=cols, r=16, device=device)
         self.counter = 0
 
-    def accum_one_sample(self,x):
+    def accum_one_sample(self,x, _):
         x = x.flatten()
         self.csobj.accumulateVec(x)
         self.counter+=1
@@ -219,7 +296,7 @@ class Feature_CountSketching():
         self.csobj = CountSketchVec(d=512, c=32, r=16, device=device)
         self.counter = 0
 
-    def accum_one_sample(self,x):
+    def accum_one_sample(self,x, _):
         featp = self.model.forward(x)
         self.csobj.accumulateVec(featp.flatten())
         self.counter+=1
@@ -241,9 +318,14 @@ def getSketcher(cfg):
                                         device="cuda"),
         "feature-Covar": ModelFeatureCovariance(weight_path=cfg.weight_path,
                                 device="cuda"),
+
+        "feature-Gauss": ModelFeatureGaussDistribution(weight_path=cfg.weight_path,
+                                classwise=False, device="cuda"),
+        "feature-GaussMixture": ModelFeatureGaussDistribution(weight_path=cfg.weight_path,
+                                classwise=True, device="cuda"),
+
         "feature-CountSketch": Feature_CountSketching(weight_path=cfg.weight_path,
                                                       device="cuda"),
-
         "image-Histogram" : Image_Histogram(img_size,  channels=channels,device="cuda"),
         "image-CountSketch": Image_CountSketching(img_size, channels=channels,device="cuda"),
 
@@ -269,6 +351,8 @@ def data_sketch_main(cfg, file_suffix=""):
 
     center_list = list(range(cfg.data_centers_count))+["all"]
 
+    if CFG.dataset == "CIFAR100": center_list.remove("all")
+
     for center_index in center_list:
         laoder_list = []
         trainloader = getAdataloader(cfg, center_index, split_type="cls_train")
@@ -286,9 +370,9 @@ def data_sketch_main(cfg, file_suffix=""):
 
         with torch.no_grad():
             for laoder in laoder_list:
-                for img, _ in tqdm(laoder):
+                for img, c in tqdm(laoder):
                     img = img.to(gpu_device, non_blocking=True)
-                    sketcher.accum_one_sample(img)
+                    sketcher.accum_one_sample(img, c)
 
         h5file.create_dataset(str(center_index), data=sketcher.get_full_aggregate(),
                               dtype=float)
@@ -304,18 +388,24 @@ def data_sketch_main(cfg, file_suffix=""):
 
 def run_for_cifar100():
     CFG.dataset   = "CIFAR100"
+    weight_root_path = "hypotheses/ClsX-cifar-OldTorch/Ex00-Cls-baseline--lr1e-3"
+
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar100-jfed/"
     CFG.data_centers_count = 10
     CFG.image_size = 224
 
-    for alp in [1000, 100, 10, 1, 0, 0.5]:
+    for alp in [1000, 100, 10, 1, 0]:  #0.5]
             CFG.dirichlet_alpha = alp
+            if weight_root_path:
+                CFG.weight_root_path = f"{weight_root_path}/{alp}_aleph/"
             data_sketch_main(CFG, file_suffix=f"{alp}-")
 
 
 
 def run_for_isicflamby():
     CFG.dataset   = "ISIC"
+    CFG.weight_root_path = "hypotheses/Cls1-isic/E00-Cls-Baseline-01/"
+
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed/"
     CFG.data_centers_count = 6
     CFG.image_size = 200
@@ -347,10 +437,12 @@ def run_for_mnist():
 
 
 if __name__ == '__main__':
-    CFG.weight_root_path = None# "hypotheses/Cls1-isic/E00-Cls-Baseline-01/"
 
     # CFG.sketch_method = "feature-only"
-    CFG.sketch_method = "feature-Covar"
+    # CFG.sketch_method = "feature-Covar"
+
+    # CFG.sketch_method = "feature-Gauss"
+    CFG.sketch_method = "feature-GaussMixture"
 
     # CFG.sketch_method = "feature-CountSketch"
     # CFG.sketch_method = "image-CountSketch"
@@ -358,7 +450,8 @@ if __name__ == '__main__':
     # CFG.sketch_method = "imagepix-RaceSketch"
 
     # run_for_mnist()
-    run_for_isicflamby()
+    run_for_cifar100()
+    # run_for_isicflamby()
 
 
 
