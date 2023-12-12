@@ -191,13 +191,22 @@ class ModelFeatureGaussDistribution():
 
 
     def _find_mean_cov(self,featp_list):
+        def tensor_cov(tensor, rowvar=True, bias=False):
+            """Estimate a covariance matrix (np.cov)
+            https://github.com/pytorch/pytorch/issues/19037#issuecomment-814496788
+            """
+            tensor = tensor if rowvar else tensor.transpose(-1, -2)
+            tensor = tensor - tensor.mean(dim=-1, keepdim=True)
+            bias_corrector = int(not bool(bias) and bool(tensor.shape[-1]-1) ) #hack to fix for single sample case
+            factor = 1 / (tensor.shape[-1] - bias_corrector)
+            return factor * tensor @ tensor.transpose(-1, -2).conj()
 
         num_features = 512
         featp_NxD = torch.stack(featp_list)
         print(featp_NxD.shape)
 
         mean = torch.mean(featp_NxD, dim=0)
-        cov = torch.cov(featp_NxD.T)  #torch.cov rows are the variables and columns are the observations
+        cov = tensor_cov(featp_NxD.T)  #torch.cov rows are the variables and columns are the observations
         print(mean.shape, cov.shape)
         return mean.detach().cpu().numpy(), cov.detach().cpu().numpy()
 
@@ -231,7 +240,7 @@ class ModelFeatureGaussDistribution():
             component_mask = (component_indices == i)
             num_samples = np.sum(component_mask)
             data_points[component_mask] = np.random.multivariate_normal(
-                    means_list[i], covs_list[i], num_samples)
+                means_list[i], covs_list[i], num_samples)
 
         return data_points
 

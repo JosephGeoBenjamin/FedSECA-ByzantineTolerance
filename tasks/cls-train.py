@@ -400,7 +400,7 @@ if __name__ == '__main__':
             runner("all", m)
             center_list.remove("all")
             for c in center_list:
-                for q in [1000, 100, 10, 1, 0]:
+                for q in [1000, 0, 100, 1, 10]:
                     CFG.dirichlet_alpha = q
                     qtitle = f"/{q}_aleph/"
                     runner(c,m,qtitle)
