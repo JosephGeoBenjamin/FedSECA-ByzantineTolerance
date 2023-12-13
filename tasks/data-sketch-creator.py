@@ -66,18 +66,18 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
                         transforms=OrganMnistClassifyAuguments(method="infer",
                                                         image_size=img_size_in))
 
-    elif cfg.dataset ==  "MNIST":
+    elif cfg.dataset ==  "HUMBLE":
         from datacode.humble_jfed_data import MNISTkind_JFedDatset
-        from datacode.augmentations import HumbleTransforms
+        from datacode.augmentations import HumbleAuguments
 
         traindataset = MNISTkind_JFedDatset(data_path  = cfg.data_path,
-                                    dataset_type  ='MNIST',
+                                    dataset_type  = cfg.dataset_type,
                                     split_type    = split_type,
                                     center        = center_index,
                                     total_centers = cfg.data_centers_count,
                                     iid_ness      = cfg.iid_ness,
                                     semi_client_per_class = 2,
-                                    transform=HumbleTransforms
+                                    transforms=HumbleAuguments()
                                     )
 
     else:
@@ -90,6 +90,20 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
                         pin_memory=True)
 
     return trainloader
+
+def getModel(model_name):
+    model_name = "resnet18" if not model_name else model_name
+
+    if model_name == "resnet18":
+        model = torchvision.models.resnet18(weights="DEFAULT")
+        model.fc = torch.nn.Identity()
+    elif model_name == "mnistnet":
+        from algorithms.feature_extractor import MnistNet
+        model = MnistNet()
+        model.classifier = torch.nn.Identity()
+    return model
+
+
 
 ### ============================================================================
 
@@ -106,11 +120,21 @@ def pretrained_weight_loader(model, weight_path):
     return model
 
 
+def tensor_cov(tensor, rowvar=True, bias=False):
+    """Estimate a covariance matrix (np.cov)
+    https://github.com/pytorch/pytorch/issues/19037#issuecomment-814496788
+    """
+    tensor = tensor if rowvar else tensor.transpose(-1, -2)
+    tensor = tensor - tensor.mean(dim=-1, keepdim=True)
+    bias_corrector = int(not bool(bias) and bool(tensor.shape[-1]-1) ) #hack to fix for single sample case
+    factor = 1 / (tensor.shape[-1] - bias_corrector)
+    return factor * tensor @ tensor.transpose(-1, -2).conj()
+
+
 class ModelFeatureMean():
-    def __init__(self, weight_path=None ,device="cuda") -> None:
-        self.model = torchvision.models.resnet18(weights="DEFAULT")
+    def __init__(self, model_name ,weight_path=None ,device="cuda") -> None:
+        self.model = getModel(model_name)
         self.model = self.model.to(device)
-        self.model.fc = torch.nn.Identity()
 
         if weight_path: self.model = pretrained_weight_loader(self.model, weight_path)
 
@@ -129,8 +153,8 @@ class ModelFeatureMean():
 
 
 class ModelFeatureCovariance():
-    def __init__(self, weight_path=None ,device="cuda") -> None:
-        self.model = torchvision.models.resnet18(weights="DEFAULT")
+    def __init__(self, model_name, weight_path=None ,device="cuda") -> None:
+        self.model = getModel(model_name)
         self.model = self.model.to(device)
         self.model.fc = torch.nn.Identity()
 
@@ -147,7 +171,6 @@ class ModelFeatureCovariance():
 
     def get_full_aggregate(self):
 
-        num_features = 512
         featp_NxD = torch.stack(self.featp_holder)
         print(featp_NxD.shape)
 
@@ -158,10 +181,9 @@ class ModelFeatureCovariance():
         return res.detach().cpu().numpy()
 
 
-
 class ModelFeatureGaussDistribution():
-    def __init__(self, weight_path=None, classwise=False ,device="cuda") -> None:
-        self.model = torchvision.models.resnet18(weights="DEFAULT")
+    def __init__(self, model_name, weight_path=None, classwise=False ,device="cuda") -> None:
+        self.model = getModel(model_name)
         self.model = self.model.to(device)
         self.model.fc = torch.nn.Identity()
 
@@ -191,17 +213,7 @@ class ModelFeatureGaussDistribution():
 
 
     def _find_mean_cov(self,featp_list):
-        def tensor_cov(tensor, rowvar=True, bias=False):
-            """Estimate a covariance matrix (np.cov)
-            https://github.com/pytorch/pytorch/issues/19037#issuecomment-814496788
-            """
-            tensor = tensor if rowvar else tensor.transpose(-1, -2)
-            tensor = tensor - tensor.mean(dim=-1, keepdim=True)
-            bias_corrector = int(not bool(bias) and bool(tensor.shape[-1]-1) ) #hack to fix for single sample case
-            factor = 1 / (tensor.shape[-1] - bias_corrector)
-            return factor * tensor @ tensor.transpose(-1, -2).conj()
 
-        num_features = 512
         featp_NxD = torch.stack(featp_list)
         print(featp_NxD.shape)
 
@@ -293,9 +305,9 @@ class Image_CountSketching():
 
 class Feature_CountSketching():
 
-    def __init__(self, weight_path=None, device="cuda") -> None:
+    def __init__(self, model_name, weight_path=None, device="cuda") -> None:
 
-        self.model = torchvision.models.resnet18(weights="DEFAULT")
+        self.model = getModel(model_name)
         self.model = self.model.to(device)
         self.model.fc = torch.nn.Identity()
 
@@ -323,19 +335,24 @@ def getSketcher(cfg):
     img_size = cfg.image_size
     channels = 3 if not cfg.channels else cfg.channels
     sketcher_dict = {
-        "feature-only": ModelFeatureMean(weight_path=cfg.weight_path,
+        "feature-only": ModelFeatureMean(model_name=cfg.model,
+                                        weight_path=cfg.weight_path,
                                         device="cuda"),
-        "feature-Covar": ModelFeatureCovariance(weight_path=cfg.weight_path,
-                                device="cuda"),
+        "feature-Covar": ModelFeatureCovariance(model_name=cfg.model,
+                                                weight_path=cfg.weight_path,
+                                                device="cuda"),
 
-        "feature-Gauss": ModelFeatureGaussDistribution(weight_path=cfg.weight_path,
-                                classwise=False, device="cuda"),
-        "feature-GaussMixture": ModelFeatureGaussDistribution(weight_path=cfg.weight_path,
-                                classwise=True, device="cuda"),
+        "feature-Gauss": ModelFeatureGaussDistribution( model_name=cfg.model,
+                                                    weight_path=cfg.weight_path,
+                                                    classwise=False, device="cuda"),
+        "feature-GaussMixture": ModelFeatureGaussDistribution(model_name=cfg.model,
+                                                        weight_path=cfg.weight_path,
+                                                        classwise=True, device="cuda"),
 
-        "feature-CountSketch": Feature_CountSketching(weight_path=cfg.weight_path,
+        "feature-CountSketch": Feature_CountSketching(model_name=cfg.model,
+                                                      weight_path=cfg.weight_path,
                                                       device="cuda"),
-        "image-Histogram" : Image_Histogram(img_size,  channels=channels,device="cuda"),
+        # "image-Histogram" : Image_Histogram(img_size,  channels=channels,device="cuda"),
         "image-CountSketch": Image_CountSketching(img_size, channels=channels,device="cuda"),
 
     }
@@ -355,12 +372,12 @@ def data_sketch_main(cfg, file_suffix=""):
     sfolderpath = cfg.checkpoint_dir+"/"+ cfg.sketch_method +"/"
     os.makedirs(sfolderpath, exist_ok=True)
 
-    h5path = f"{sfolderpath}/{cfg.dataset}-C{cfg.data_centers_count}-{file_suffix}.h5"
+    h5path = f"{sfolderpath}/{cfg.dataset}{cfg.dataset_type}-C{cfg.data_centers_count}-{file_suffix}.h5"
     h5file = h5py.File(h5path,"w")
 
     center_list = list(range(cfg.data_centers_count))+["all"]
 
-    if CFG.dataset == "CIFAR100": center_list.remove("all")
+    if CFG.dataset in ["CIFAR100", "HUMBLE"]: center_list.remove("all")
 
     for center_index in center_list:
         laoder_list = []
@@ -432,14 +449,20 @@ def run_for_organmnist():
 
 
 def run_for_mnist():
-    CFG.dataset   = "MNIST"
+    CFG.dataset      = "HUMBLE"
+    CFG.dataset_type = "MNIST"
+    weight_root_path = "hypotheses/Cls1-Humble/Ex00-MNIST-Cls-001/"
+
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/torch-data/"
+    CFG.model = "mnistnet"
     CFG.data_centers_count = 5
     CFG.image_size = 28
     CFG.channels   = 1
     CFG.disable_validation = True
 
     for alp in ["non", "full", "semi"]:
+            if weight_root_path:
+                CFG.weight_root_path = f"{weight_root_path}/{alp}_iid/"
             CFG.iid_ness = alp
             data_sketch_main(CFG, file_suffix=f"{alp}-")
 
@@ -458,8 +481,8 @@ if __name__ == '__main__':
     # CFG.sketch_method = "image-Histogram"
     # CFG.sketch_method = "imagepix-RaceSketch"
 
-    # run_for_mnist()
-    run_for_cifar100()
+    run_for_mnist()
+    # run_for_cifar100()
     # run_for_isicflamby()
 
 
