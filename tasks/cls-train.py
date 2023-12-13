@@ -110,6 +110,11 @@ def getDataLoaders(cfg, center_index, type="train"):
     elif cfg.dataset == "ORGAN-MNIST":
         from datacode.orgmnist_jfed_data import getOrganMnistCLSLoaders as trainloader
         from datacode.orgmnist_jfed_data import getOrganMnistTESTLoader as testloader
+
+    elif cfg.dataset == "HUMBLE":
+        from datacode.humble_jfed_data import getHumbleCLSLoaders as trainloader
+        from datacode.humble_jfed_data import getHumbleTESTLoader as testloader
+
     else:
         raise ValueError(f"Unsupported data type specfied {cfg.dataset}")
 
@@ -404,6 +409,17 @@ if __name__ == '__main__':
                     CFG.dirichlet_alpha = q
                     qtitle = f"/{q}_aleph/"
                     runner(c,m,qtitle)
+
+    elif CFG.dataset == "HUMBLE":
+        for m in model_list:
+            runner("all", m)
+            center_list.remove("all")
+            for c in center_list:
+                for q in ["full", "semi", "non"]:
+                    CFG.iid_ness = q
+                    qtitle = f"/{q}_iid/"
+                    runner(c,m,qtitle)
+
 
     else:
         for m in model_list:

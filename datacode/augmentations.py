@@ -111,7 +111,7 @@ class CifarClassifyAuguments:
             torch_transforms.Resize((self.image_size, self.image_size),
                                     interpolation=InterpolationMode.BICUBIC),
             torch_transforms.RandomHorizontalFlip(),
-            torch_transforms.RandomRotation(5),
+            torch_transforms.RandomRotation(10),
             torch_transforms.ToTensor(),
             torch_transforms.Normalize(mean=data_mean, std=data_std)
             ])
@@ -186,7 +186,23 @@ class OrganMnistClassifyAuguments:
 ##====================== Humble (MNIST) Transforms =============================
 
 
-HumbleTransforms = torch_transforms.Compose([
-    torch_transforms.transforms.ToTensor(),
-    torch_transforms.transforms.Normalize((0.5,), (0.5,))
-])
+
+class HumbleAuguments:
+    def __init__(self, C1_to_C3 = True):
+        print("Humble Transforms",)
+
+        transforms_list = []
+        if C1_to_C3:
+            transforms_list.append(torch_transforms.transforms.Grayscale(num_output_channels=3))
+        transforms_list.append(torch_transforms.transforms.ToTensor(),)
+        transforms_list.append(torch_transforms.transforms.Normalize((0.5,), (0.5,)))
+
+        self.transform_main = torch_transforms.Compose(transforms_list)
+
+
+    def __call__(self, x):
+        y = self.transform_main(x)
+        return y
+
+    def get_composition(self):
+        return str(self.transform_main)
