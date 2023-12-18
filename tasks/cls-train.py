@@ -31,7 +31,8 @@ test_partitions = 6,
 override_csv = None,
 
 ## data specifics
-dirichlet_alpha = 999, # for Cifar100
+dirichlet_alpha = 9999,   # for Cifar100
+iid_ness        = "ERR", # for Cifar100 / MNISTs  [full, semi-mix, semi-pure, non]
 
 epochs        = 100,
 image_size    = 200,
@@ -256,6 +257,7 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
         ## ---- Training Routine ----
         model.train()
         for img, tgt in tqdm(trainloader):
+            if img.shape[0]<2: print("One sample case: skipping last batch "); continue;
             img = img.to(gpu_device, non_blocking=True)
             tgt = tgt.to(gpu_device, non_blocking=True)
             optimizer.zero_grad()
@@ -415,7 +417,7 @@ if __name__ == '__main__':
             runner("all", m)
             center_list.remove("all")
             for c in center_list:
-                for q in ["full", "semi", "non"]:
+                for q in ["full", "semi-mix", "semi-pure", "non"]:
                     CFG.iid_ness = q
                     qtitle = f"/{q}_iid/"
                     runner(c,m,qtitle)

@@ -116,6 +116,11 @@ def getDataLoaders(cfg, center_index=None, type="train"):
     elif cfg.dataset == "ORGAN-MNIST":
         from datacode.orgmnist_jfed_data import getOrganMnistCLSLoaders as trainloader
         from datacode.orgmnist_jfed_data import getOrganMnistTESTLoader as testloader
+
+    elif cfg.dataset == "HUMBLE":
+        from datacode.humble_jfed_data import getHumbleCLSLoaders as trainloader
+        from datacode.humble_jfed_data import getHumbleTESTLoader as testloader
+
     else:
         raise ValueError(f"Unsupported data type specfied {cfg.dataset}")
 
@@ -579,20 +584,31 @@ if __name__ == '__main__':
         logpth = simple_main(model_key=model_key, folder_suffix=folder_suffix)
         simple_test(logpth, test_model_list)
 
+    ##-----
 
-    def cifar_vs_rest_wrap(xtitle=""):
-        """For running different alephs in cifar"""
+    def iided_vs_simple_wrap(xtitle=""):
+        """For running different alephs/iidness in cifar100 or mnists"""
+
         if CFG.dataset == "CIFAR":
             quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
 
             for q in quantity:
-                CFG.dirichlet_alpha = q  #~~~~
+                CFG.dirichlet_alpha = q   #~~~~
                 qtitle = xtitle + f"/{q}_aleph/"
                 train_runner(folder_suffix=qtitle)
+
+        elif CFG.dataset == "HUMBLE":
+            quantity = ["full", "semi-mix", "semi-pure", "non"]
+
+            for q in quantity:
+                CFG.iid_ness = q     #~~~~
+                qtitle = xtitle + f"/{q}_iid/"
+                train_runner(folder_suffix=qtitle)
+
         else:
             train_runner()
 
-
+    ##-----
 
     def sketch_compressions_wrap():
 
@@ -605,9 +621,10 @@ if __name__ == '__main__':
             CFG.sketch_compress_factor = sx  #~~~~
             xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
             print(xtitle)
-            cifar_vs_rest_wrap(xtitle)
+            iided_vs_simple_wrap(xtitle)
 
     ###----------------------------------
-    train_runner()
-    # cifar_vs_rest_wrap()
+
+    # train_runner()
+    iided_vs_simple_wrap()
     # sketch_compressions_wrap()

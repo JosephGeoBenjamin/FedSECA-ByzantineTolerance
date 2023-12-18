@@ -26,6 +26,8 @@ class Cifar100_JFedDataset(torch.utils.data.Dataset):
         split_type: str = "ssl_train", # cls_train / cls_valid / test
         total_centers = 10,
         dirichlet_alpha = 1000,
+        iid_ness = "full",         # full / semi-mix / semi-pure / non
+        semi_client_per_class = 2, # only for semi iid_ness
         label_type = "fine_label", # fine_label->100 / coarse_label->20
         transforms=None,
     ):
@@ -62,15 +64,26 @@ class Cifar100_JFedDataset(torch.utils.data.Dataset):
         self.label_type = label_type
         self.pooled = True if center == "all" else False
 
+        assert not (dirichlet_alpha and iid_ness), "Only one of `iid_ness` or `dirichlet` must be set"
+        self.dirichlet_alpha = dirichlet_alpha
+        self.iid_ness = iid_ness
+
         if not self.pooled:
             if (dirichlet_alpha is not None) and (dirichlet_alpha is not False):
+                print("Using DIRICHLET based labelwise Split !!!")
                 df2["center"] = df2[f"{dirichlet_alpha}_alpha_id"].apply(self._remap_values)
+                df2 = df2[df2["center"] == center]
+
+            elif (iid_ness is not None) and (iid_ness is not False):
+                print("Using Manual IIDNESS labelwise Split !!!")
+                raise "toos"
             else:
+                print("Defaulting to very random Split !!!")
                 state = np.random.get_state(); np.random.seed(100)
                 df2["center"] = np.random.randint(0, self.total_centers, size=len(df2))
                 np.random.set_state(state)
+                df2 = df2[df2["center"] == center]
 
-            df2 = df2[df2["center"] == center]
 
         self.df2     = df2.reset_index()
         self.targets = list(self.df2[label_type])
@@ -135,12 +148,15 @@ def getCifar100CLSLoaders(cfg, center_index = None, override_csv = None):
                         pin_memory=True)
 
     lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "Train-":len(traindataset),
-                     "Transform": str(traindataset.transforms.get_composition()),
-                    #  "class-weights":str(class_weights)
+                    "TargetClasses": str(set(traindataset.targets)),
+                    "Transform": str(traindataset.transforms.get_composition()),
+                    ## "class-weights":str(class_weights)
                      }, info_log_path)
+
     lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "Valid-":len(validdataset),
-                     "Transform": str(validdataset.transforms.get_composition()),
-                     }, info_log_path)
+                    "TargetClasses": str(set(validdataset.targets)),
+                    "Transform": str(validdataset.transforms.get_composition()),
+                    }, info_log_path)
 
     if override_csv:
         lutl.LOG2TXT(f"OverRide CSV-set: {override_csv} !^!^!^!", info_log_path)
@@ -171,6 +187,7 @@ def getCifar100TESTLoader(cfg, center_index = None):
 
     lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "TEST-":len(dataset),
                     "Transform": str(dataset.transforms.get_composition()),
+                    "TargetClasses": set(dataset.targets),
                      }, info_log_path)
 
     return testloader

@@ -3,6 +3,7 @@ import os, sys
 import torch
 import torchvision
 import itertools
+import numpy as np
 
 sys.path.append(os.getcwd())
 import utilities.logUtils as lutl
@@ -29,7 +30,7 @@ class MNISTkind_JFedDatset(torch.utils.data.Dataset):
                     dataset_type = "MNIST",
                     center = "all",
                     total_centers = 5,
-                    iid_ness = "full", # full / semi / non
+                    iid_ness = "full", # full / semi-mix / semi-pure / non
                     semi_client_per_class = 2, # only for semi iid_ness
                     split_type: str = "cls_train",
                     seed = 59,
@@ -37,7 +38,10 @@ class MNISTkind_JFedDatset(torch.utils.data.Dataset):
 
         self.center = center
         self.total_centers = total_centers
+        self.iid_ness = iid_ness
+        self.semi_client_per_class = semi_client_per_class
         self.transforms = transforms
+
         if   split_type == "cls_train": self.train = True
         elif split_type == "cls_test" : self.train = False
         else: raise Exception(f"Unknown Split type specified, {split_type}")
@@ -52,46 +56,91 @@ class MNISTkind_JFedDatset(torch.utils.data.Dataset):
             self.full_dataset = torchvision.datasets.EMNIST(root=data_path, split="balanced",
                                                 train=self.train, download=True, transform=transforms)
 
-
         if (not self.train) or (center=="all"):
             self.client_dataset = self.full_dataset
-            return
+        else:
+            assert center < total_centers, f"center {center} doesnot exist for totalcenters {total_centers}"
 
-        assert center < total_centers, f"center {center} doesnot exist for totalcenters {total_centers}"
+            self.client_dataset = self._split_based_on_iidness()
+
+
+        self.targets = [d[1] for d in self.client_dataset]
+
+
+
+    def _split_based_on_iidness(self):
+        client_dataset = []
         grouped_data = group_dataitem_by_class(self.full_dataset)
         cls_count = len(grouped_data)
-        # print(dataset_type, ">>> Class Count:::", cls_count)
-        assert cls_count >= total_centers, (f"Total Class {cls_count} < Total Centers {total_centers}; "
+        assert cls_count >= self.total_centers, (f"Total Class {cls_count} < Total Centers {self.total_centers}; "
                                             "This will result in unexpected behaviour in non/semi iid-ness modes")
 
-        self.client_dataset = []
-        if iid_ness == "non":
+
+        if self.iid_ness == "non":
             # if total center > classes then will return empty partitions
             # for all centers above the class count
             for i, gd in enumerate(grouped_data):
-                if (i % total_centers) == center:
-                    self.client_dataset.extend(gd)
+                if (i % self.total_centers) == self.center:
+                    client_dataset.extend(gd)
 
-        elif iid_ness == "full":
+
+        elif self.iid_ness == "full":
             for i, gd in enumerate(grouped_data):
-                self.client_dataset.extend(gd[center::total_centers])
+                client_dataset.extend(gd[self.center::self.total_centers])
 
-        elif iid_ness == "semi":
+
+        elif self.iid_ness == "semi-mix":
             # if total center > classes then will return non overlapping classes
             # thus outcome will result in non-iid type data partition
             data_chunk = []
-            divsr = semi_client_per_class
+            divsr = self.semi_client_per_class
             for i, gd in enumerate(grouped_data):
                 chunk = len(gd)//divsr
                 for j in range(divsr):
                     data_chunk.append(gd[j*chunk: (j+1)*chunk])
             flattened_list = [inner
-                              for outer in data_chunk[center::total_centers]
+                              for outer in data_chunk[self.center::self.total_centers]
                               for inner in outer]
-            self.client_dataset.extend(flattened_list)
+            client_dataset.extend(flattened_list)
+
+
+        elif self.iid_ness == "semi-pure":
+            # will try to approximate the data counts in client but not guarenteed always
+            divsr = self.semi_client_per_class
+            class_chunk_est = [[] for i in range(self.total_centers)]
+            chunk_chi = []
+            group_ids = list(range(len(grouped_data)))
+            center_pointer = 0
+
+            cls_size = int(np.ceil(len(group_ids) / int(np.ceil(self.total_centers/divsr)) ))
+            cls_groups = [group_ids[i:i + cls_size] for i in range(0, len(group_ids), cls_size)]
+
+            while center_pointer<self.total_centers:
+                grp = cls_groups.pop(0)
+                for j in range(divsr):
+                    if center_pointer< self.total_centers:
+                        class_chunk_est[center_pointer] = grp
+                        chunk_chi.append(j)
+                        center_pointer+=1
+            # print(class_chunk_est)
+
+            class_chunk_est = [ (clss, class_chunk_est.count(clss), chunk_chi[i])
+                            for i, clss in enumerate(class_chunk_est)]
+
+            clses, chunks, chi = class_chunk_est[self.center]
+            flattened_list = []
+            for cls in clses:
+                gd = grouped_data[cls]
+                chunk_sz = len(gd) // chunks
+                flattened_list.extend(gd[chi*chunk_sz:(chi+1)*chunk_sz])
+
+            client_dataset.extend(flattened_list)
+
 
         else:
-            raise f"unknown iidness specified {iid_ness}"
+            raise f"unknown iidness specified {self.iid_ness}"
+
+        return client_dataset
 
 
     def __len__(self):
@@ -147,12 +196,14 @@ def getHumbleCLSLoaders(cfg, center_index = None, override_csv = None):
                         batch_size=batch_size, num_workers=workers,
                         pin_memory=True)
 
-    lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "Train-":len(traindataset),
-                     "Transform": str(traindataset.transforms.get_composition()),
+    lutl.LOG2DICTXT({"DC":(cfg.data_type, center_index), "Train-":len(traindataset),
+                    "TargetClasses": str(set(traindataset.targets)),
+                    "Transform": str(traindataset.transforms.get_composition()),
                     #  "class-weights":str(class_weights)
                      }, info_log_path)
-    lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "Valid-":len(validdataset),
-                     "Transform": str(validdataset.transforms.get_composition()),
+    lutl.LOG2DICTXT({"DC":(cfg.data_type, center_index), "Valid-":len(validdataset),
+                    "TargetClasses": str(set(traindataset.targets)),
+                    "Transform": str(validdataset.transforms.get_composition()),
                      }, info_log_path)
 
     if override_csv:
@@ -184,7 +235,8 @@ def getHumbleTESTLoader(cfg, center_index = None):
                         batch_size=batch_size, num_workers=workers,
                         pin_memory=True)
 
-    lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "TEST-":len(dataset),
+    lutl.LOG2DICTXT({"DC":(cfg.data_type, center_index), "TEST-":len(dataset),
+                    "TargetClasses": str(set(dataset.targets)),
                     "Transform": str(dataset.transforms.get_composition()),
                      }, info_log_path)
 
