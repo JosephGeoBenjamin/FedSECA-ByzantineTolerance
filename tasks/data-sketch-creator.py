@@ -24,7 +24,7 @@ print(f"cuda version: {torch.version.cuda}")
 
 CFG = rutl.ObjDict(
 
-checkpoint_dir= "hypotheses/DataSketchColl/trail-002/",
+checkpoint_dir= "hypotheses/DataSketchColl/trail-003/",
 )
 
 ### ----------------------------------------------------------------------------
@@ -97,9 +97,9 @@ def getModel(model_name):
     if model_name == "resnet18":
         model = torchvision.models.resnet18(weights="DEFAULT")
         model.fc = torch.nn.Identity()
-    elif model_name == "mnistnet":
-        from algorithms.feature_extractor import MnistNet
-        model = MnistNet()
+    elif model_name == "resnet9":
+        from algorithms.feature_extractor import resnet9
+        model = resnet9()
         model.classifier = torch.nn.Identity()
     return model
 
@@ -375,9 +375,8 @@ def data_sketch_main(cfg, file_suffix=""):
     h5path = f"{sfolderpath}/{cfg.dataset}{cfg.dataset_type}-C{cfg.data_centers_count}-{file_suffix}.h5"
     h5file = h5py.File(h5path,"w")
 
-    center_list = list(range(cfg.data_centers_count))+["all"]
+    center_list = ["all"] + list(range(cfg.data_centers_count))
 
-    if CFG.dataset in ["CIFAR100", "HUMBLE"]: center_list.remove("all")
 
     for center_index in center_list:
         laoder_list = []
@@ -391,6 +390,11 @@ def data_sketch_main(cfg, file_suffix=""):
         ## Load Weights
         if cfg.weight_root_path:
             cfg.weight_path = f"{cfg.weight_root_path}/center_{center_index}/weights/bestmodel.pth"
+
+            # all center in below cases won't be in the iided split  >>>
+            if (CFG.dataset in ["CIFAR100", "HUMBLE"]) and (center_index == "all"):
+                last_dir = list(filter(None, cfg.weight_root_path.split("/")))[-1]
+                cfg.weight_path = f"{cfg.weight_root_path.replace(last_dir, '')}/center_{center_index}/weights/bestmodel.pth"
 
         sketcher = getSketcher(cfg)
 
@@ -451,16 +455,16 @@ def run_for_organmnist():
 def run_for_mnist():
     CFG.dataset      = "HUMBLE"
     CFG.dataset_type = "MNIST"
-    weight_root_path = "hypotheses/Cls1-Humble/Ex00-MNIST-Cls-001/"
+    weight_root_path = "hypotheses/Cls1-Humble/Ex00-MNIST-Cls-003/"
 
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/torch-data/"
-    CFG.model = "mnistnet"
+    CFG.model = "resnet9"
     CFG.data_centers_count = 5
     CFG.image_size = 28
     CFG.channels   = 1
     CFG.disable_validation = True
 
-    for alp in ["non", "full", "semi"]:
+    for alp in ["non", "full", "semi-mix", "semi-pure"]:
             if weight_root_path:
                 CFG.weight_root_path = f"{weight_root_path}/{alp}_iid/"
             CFG.iid_ness = alp
