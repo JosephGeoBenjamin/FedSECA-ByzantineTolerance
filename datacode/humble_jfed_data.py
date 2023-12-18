@@ -12,18 +12,6 @@ from datacode.augmentations import HumbleAuguments
 
 ##==============================================================================
 
-def group_dataitem_by_class(data_list):
-
-    sorted_tuples = sorted(data_list, key=lambda x: x[1])
-    n = max(sorted_tuples, key=lambda x: x[1])[1]+1
-
-    grouped_tuples = [list(group) for _, group in itertools.groupby(sorted_tuples, key=lambda x: x[1])]
-
-    assert n == len(grouped_tuples), f"unmatched N {n}; G {len(grouped_tuples)}"
-    return grouped_tuples
-
-
-
 class MNISTkind_JFedDatset(torch.utils.data.Dataset):
     """For datasets form torch data"""
     def __init__(self, data_path: str = None,
@@ -68,9 +56,20 @@ class MNISTkind_JFedDatset(torch.utils.data.Dataset):
 
 
 
+    def group_dataitem_by_class(self, data_list):
+
+        sorted_tuples = sorted(data_list, key=lambda x: x[1])
+        n = max(sorted_tuples, key=lambda x: x[1])[1]+1
+
+        grouped_tuples = [list(group) for _, group in itertools.groupby(sorted_tuples, key=lambda x: x[1])]
+
+        assert n == len(grouped_tuples), f"unmatched N {n}; G {len(grouped_tuples)}"
+        return grouped_tuples
+
+
     def _split_based_on_iidness(self):
         client_dataset = []
-        grouped_data = group_dataitem_by_class(self.full_dataset)
+        grouped_data = self.group_dataitem_by_class(self.full_dataset)
         cls_count = len(grouped_data)
         assert cls_count >= self.total_centers, (f"Total Class {cls_count} < Total Centers {self.total_centers}; "
                                             "This will result in unexpected behaviour in non/semi iid-ness modes")
@@ -141,6 +140,8 @@ class MNISTkind_JFedDatset(torch.utils.data.Dataset):
             raise f"unknown iidness specified {self.iid_ness}"
 
         return client_dataset
+
+
 
 
     def __len__(self):

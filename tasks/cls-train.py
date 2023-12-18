@@ -401,16 +401,30 @@ if __name__ == '__main__':
     center_list = ["all"] +list(range(CFG.data_centers_count))
     # center_list = ["all"]
 
+    data_partition_type = "iid" # aleph / iid
+
+    ## ----------
 
     if CFG.dataset == "CIFAR":
         for m in model_list:
             runner("all", m)
             center_list.remove("all")
+
             for c in center_list:
-                for q in [1000, 0, 100, 1, 10]:
-                    CFG.dirichlet_alpha = q
-                    qtitle = f"/{q}_aleph/"
-                    runner(c,m,qtitle)
+                if data_partition_type=="aleph":
+                    for q in [1000, 0, 100, 1, 10]:
+                        CFG.iid_ness = None
+                        CFG.dirichlet_alpha = q
+                        qtitle = f"/{q}_aleph/"
+                        runner(c,m,qtitle)
+
+                if data_partition_type=="iid":
+                    for q in ["full", "non", "semi-mix", "semi-pure"]:
+                        CFG.dirichlet_alpha=None
+                        CFG.iid_ness = q
+                        qtitle = f"/{q}_iid/"
+                        runner(c,m,qtitle)
+
 
     elif CFG.dataset == "HUMBLE":
         for m in model_list:
@@ -427,3 +441,5 @@ if __name__ == '__main__':
         for m in model_list:
             for c in center_list:
                 runner(c,m)
+
+    ## ----------
