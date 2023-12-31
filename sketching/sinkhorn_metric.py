@@ -1,4 +1,7 @@
-""" Code gracefully copied from https://github.com/fwilliams/scalable-pytorch-sinkhorn
+"""
+Entropy-Regularized p-Wasserstein Distance
+
+Code gracefully copied from https://github.com/fwilliams/scalable-pytorch-sinkhorn
 """
 
 
@@ -9,7 +12,7 @@ import torch
 
 import tqdm
 
-def sinkhorn_pytorch(x: torch.Tensor, y: torch.Tensor, p: float = 2,
+def sinkhorn_pointcloud_pytorch(x: torch.Tensor, y: torch.Tensor, p: float = 2,
              w_x: Union[torch.Tensor, None] = None,
              w_y: Union[torch.Tensor, None] = None,
              eps: float = 1e-3,

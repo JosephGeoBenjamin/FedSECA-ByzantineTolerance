@@ -287,8 +287,8 @@ def getCifar100TESTLoader(cfg, center_index = None):
                         pin_memory=True)
 
     lutl.LOG2DICTXT({"DC":("CIFAR", center_index), "TEST-":len(dataset),
+                    "TargetClasses": str(set(dataset.targets)),
                     "Transform": str(dataset.transforms.get_composition()),
-                    "TargetClasses": set(dataset.targets),
                      }, info_log_path)
 
     return testloader
