@@ -49,12 +49,12 @@ reg_coeff     = 0,
 
 featx_arch     = "resnet18",
 featx_pretrain = "IMAGENET-1K" , # "IMAGENET-1K" or None
-featx_dropout  = 0.2,
+featx_dropout  = 0.0,
 featx_freeze   = False,
 featx_bnorm    = False,
 
 clsfy_layers   = [9], #First mlp inwill be set w.r.t FeatureExtractor
-clsfy_dropout  = 0.5,
+clsfy_dropout  = 0.0,
 
 checkpoint_dir= "hypotheses/#dummy-run/trail-001",
 resume_training=False

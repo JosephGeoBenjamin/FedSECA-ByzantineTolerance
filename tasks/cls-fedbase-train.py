@@ -24,6 +24,8 @@ print(f"cuda version: {torch.version.cuda}")
 
 ##============================= Configure and Setup ============================
 
+ANALYSE_MODELS = True
+
 CFG = rutl.ObjDict(
 dataset = "ISIC",
 data_root_path  = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed",
@@ -51,12 +53,12 @@ reg_coeff    = 0.0,
 
 featx_arch     = "resnet18",
 featx_pretrain = "IMAGENET-1K" , # "IMAGENET-1K" or None``
-featx_dropout  = 0.2,
+featx_dropout  = 0.0,
 featx_freeze   = False,
 featx_bnorm    = False,
 
 clsfy_layers   = [9], #First mlp inwill be set w.r.t FeatureExtractor
-clsfy_dropout  = 0.5,
+clsfy_dropout  = 0.0,
 
 print_freq_lstep = 0,
 ckpt_freq_Gstep  = 1,
@@ -173,10 +175,13 @@ def getModel(model_key=None, device="cpu"):
 ### ============================================================================
 
 def getFedProtocol():
-    if CFG.fed_approach == "fedavg":
-        fedProtocol = fedops.SimpleΞFedAvg
-    elif CFG.fed_approach == "countsketch":
-        fedProtocol = fedops.NaiveΞCountSketch
+    if CFG.fed_approach == "fedavg+state":
+        fedProtocol = fedops.SimpleStateΞFedAvg
+    elif CFG.fed_approach == "fedavg+param":
+        fedProtocol = fedops.SimpleParamΞFedAvg
+    elif CFG.fed_approach == "fedavg+deltaparam":
+        fedProtocol = fedops.DeltaParamΞFedAvg
+
     elif CFG.fed_approach == "countsketch+deltaweight":
         fedProtocol = fedops.DeltaWeightΞCountSketch
     elif CFG.fed_approach == "countsketch+fetchsgd":
@@ -238,13 +243,17 @@ class ClsFedHandler(object):
         optimizer = self.local_optim
         scheduler = self.local_scheduler
         scaler    = self.local_scaler
+        return_result = {}
 
         if CFG.enable_fedprox:
             global_model_prox = copy.deepcopy(model)
 
-        startValidMetric = self.run_validation(model)
+        if ANALYSE_MODELS:
+            model_start = copy.deepcopy(model)
 
+        startValidMetric = self.run_validation(model)
         ### --------------
+
         if scheduler: scheduler.last_epoch = epoch
         stat_accum = {}; locstat = {}
         model.train()
@@ -276,8 +285,8 @@ class ClsFedHandler(object):
             self.trainMetric.add_entry(torch.argmax(pred, dim=1), tgt, loss, loss_info)
         #end epoch
         if scheduler: scheduler.step()
-        ### --------------
 
+        ### --------------
         self.validMetric = self.run_validation(model)
 
         logs = dict(mode="Epoch-up", epoch=epoch, ID=self.id,
@@ -310,9 +319,23 @@ class ClsFedHandler(object):
                 )
             lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-local-bests.txt', console=False)
 
+
+        if ANALYSE_MODELS:
+            diff_dict = fedutl.find_layerwise_weight_difference(model, model_start)
+
+            diff_dict["client"] = self.id
+            diff_dict["epoch"] = epoch
+            lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/train-weight-difference.txt', console=False)
+
+            model_diff_vec = fedops.get_param_from_model(model, only_with_grad=False) \
+                                - fedops.get_param_from_model(model_start, only_with_grad=False)
+            return_result["model_diff_vec"] = model_diff_vec
+        ## end >>>>> analyse_models
+
         self.trainMetric.reset()
         self.validMetric.reset()
-        return { "model": copy.deepcopy(model)}
+        return_result["model"] = copy.deepcopy(model)
+        return return_result
 
 
     def run_validation(self, model, prefix=""):
@@ -425,7 +448,9 @@ def simple_main(model_key=None, folder_suffix=""):
     for itr in range(start_itrs, total_itrs):
 
         ## ------ Training Routine ------
-        local_model_clues = []
+        local_clues_for_fed = []
+        if ANALYSE_MODELS: local_info_for_ansys = []
+
         # global_model.train()
 
         for id in  traindozers.keys():
@@ -442,13 +467,34 @@ def simple_main(model_key=None, folder_suffix=""):
                 lret = fed_locals[id].train_one_epoch(epoch = itr)
             else: raise Exception("Unknown Update Mode set")
 
-            local_model_clues.append(fed_locals[id].fedprtcl.synopsize_local(lret))
+            local_clues_for_fed.append(fed_locals[id].fedprtcl.synopsize_local(lret))
+            if ANALYSE_MODELS: local_info_for_ansys.append(lret)
 
-        global_aggset = global_fedprtcl.aggregate_globally(local_model_clues, device=g_device)
+        global_aggset = global_fedprtcl.aggregate_globally(local_clues_for_fed, device=g_device)
 
         ## caching to global_object for analysis
         global_model, global_agghatch = global_fedprtcl.desynopsize_local(
                                                 global_aggset, device=g_device,)
+
+        if ANALYSE_MODELS:
+            diff_l2_norm = []
+            diff_cos_sim = []
+            for info1 in local_info_for_ansys:
+                difl2 = []
+                difcos = []
+                for info2 in local_info_for_ansys:
+                    dv1 = info1["model_diff_vec"]
+                    dv2 = info2["model_diff_vec"]
+                    difl2.append(torch.norm(dv1-dv2).item())
+                    difcos.append(nn.functional.cosine_similarity(dv1.view(1,-1), dv2.view(1,-1)).item()  )
+
+                diff_l2_norm.append(difl2)
+                diff_cos_sim.append(difcos)
+            dists_dict = {"epoch": itr,
+                        "diff_l2norm":diff_l2_norm, "diff_cosine": diff_cos_sim}
+
+            lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/train-weight-simMatrix.txt', console=False)
+        ## end >>>>> analyse_models
 
 
         ## save checkpoint

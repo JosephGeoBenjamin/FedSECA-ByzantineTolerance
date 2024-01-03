@@ -43,6 +43,11 @@ def resnet9(**kwargs):
 
 def load_ResnetBackbone(arch, torch_pretrain= None, freeze= False):
 
+    norm_layer = None
+    ## TODO: add below for custom norm support
+    # sd = models.resnet18(pretrained=True).state_dict()
+    # model.load_state_dict(sd, strict=False)
+
     ## pretrain setting
     if torch_pretrain in ["DEFAULT", "IMAGENET-1K"]:
         torch_pretrain = "DEFAULT"
@@ -55,16 +60,16 @@ def load_ResnetBackbone(arch, torch_pretrain= None, freeze= False):
     ## Model loading
     if arch == 'resnet18':
         backbone = torchvision.models.resnet18(zero_init_residual=True,
-                                weights=torch_pretrain)
+                            weights=torch_pretrain, norm_layer = norm_layer)
         outfeat_size = 512
 
     elif arch == 'resnet50':
         backbone = torchvision.models.resnet50(zero_init_residual=True,
-                            weights=torch_pretrain)
+                            weights=torch_pretrain, norm_layer= norm_layer)
         outfeat_size = 2048
 
     elif arch == 'resnet9':
-        backbone  = resnet9()
+        backbone  = resnet9(norm_layer= norm_layer)
         outfeat_size = 512
 
     else:
