@@ -1,0 +1,29 @@
+{ "BYZANTINE_METHODS": [
+
+    {
+    "byztn_clients": [],
+    "byztn_method" : "AffineζAttack",
+    "scale":-1
+    }
+
+],
+
+
+"DEFENSE_METHODS": [
+
+
+    {
+    "defense_method" : "NoGuardΞByzantine"
+    },
+
+    {
+    "defense_method" : "KrumΞByzantine",
+    "multikrum_m"    : 1,
+    "num_assumed_byz": 2
+    }
+
+
+]
+
+
+}

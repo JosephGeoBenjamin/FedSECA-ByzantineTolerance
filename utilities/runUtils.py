@@ -58,6 +58,17 @@ class ObjDict(dict):
         super(ObjDict, self).__delitem__(key)
         del self.__dict__[key]
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+
+    # TODO: commenting for Safety Add back later
+    # def update(self, *args, **kwargs):
+    #     for k, v in dict(*args, **kwargs).items():
+    #         self.__setitem__(k, v)
+
 
 ##======================= NVIDIA - GPU =========================================
 

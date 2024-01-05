@@ -184,14 +184,11 @@ def getFedProtocol():
         fedProtocol = fedops.SimpleParamΞFedAvg
     elif CFG.fed_approach == "fedavg+deltaparam":
         fedProtocol = fedops.DeltaParamΞFedAvg
-    elif CFG.fed_approach == "fedavg+byz_noguard":
-        fedProtocol = fedbyz.NoGuardΞByzantine
 
+    elif CFG.fed_approach == "fedavg+byzantine":
+        fedProtocol = fedbyz.NoGuardΞByzantine  #default
+        fedProtocol = getattr(fedbyz, CFG.defense_cfg["defense_method"])
 
-    elif CFG.fed_approach == "countsketch+deltaweight":
-        fedProtocol = fedops.DeltaWeightΞCountSketch
-    elif CFG.fed_approach == "countsketch+fetchsgd":
-        fedProtocol = fedops.FetchSGDishΞCountSketch
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
     return fedProtocol
@@ -309,7 +306,7 @@ class ClsFedHandler(object):
                     validlossInfo = self.validMetric.get_loss_info_aggregates(),
                     time=int(time.time()),)
         lutl.LOG2DICTXT(logs, CFG.gLogPath +'/train-local-stats.txt')
-        lutl.LOG2CSV( [self.id,"#",epoch,"#"]+self.trainMetric.nnloss, CFG.gLogPath +'metrics/train-losses.csv')
+        lutl.LOG2CSV( [self.id,"#",epoch,"#"]+self.trainMetric.nnloss, CFG.gLogPath +'/metrics/train-losses.csv')
 
         best_flag = False
         if self.loc_val_best < logs['validF1']:
