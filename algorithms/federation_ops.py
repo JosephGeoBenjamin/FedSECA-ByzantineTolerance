@@ -8,7 +8,7 @@ from sketching.count_sketch import CountSketchVec, CountSketchVec_NoSignHash
 
 ##------------------------------------------------------------------------------
 class MethodsΞTemplate():
-    def __init__(self, cfg, model, device="cpu"):
+    def __init__(self, cfg, id, model, device="cpu"):
         pass
 
     #@instancemethod # Local info aggregation Locally
@@ -54,10 +54,10 @@ def model_copier(m):
     return copy.deepcopy(m)
 
 
-def global_average_weights(w:list, device = "cpu"):
+def global_average_statedict(w:list, device = "cpu"):
     """
-    w: list of pytorch parameters for weighs
-    Returns the average of the weights.
+    w: list of pytorch weights statedict
+    Returns the average of the weights as statedict
     """
     w_avg = copy.deepcopy(w[0])
     for key in w_avg.keys():
@@ -75,11 +75,40 @@ def get_param_from_model(model:torch.nn.Module, only_with_grad=False):
             param_vec.append(p.data.view(-1).float())
     return torch.cat(param_vec)
 
+
 def get_param_from_state(state_dict:dict):
     param_vec = []
     for key, value in state_dict.items():
         param_vec.append(value.view(-1).float())
     return torch.cat(param_vec)
+
+
+def set_param_in_model(model, param_vec, only_with_grad=False):
+    """ Does inplace change to model object and also returns
+    """
+    start = 0
+    for p in model.parameters():
+        if ( not only_with_grad) or p.requires_grad:
+            end = start + p.numel()
+            p.data.zero_()
+            p.data.add_(param_vec[start:end].view(p.size()))
+            start = end
+    assert (end == len(param_vec)), f"Mismatch in Sizes in set_param : {end} vs {len(param_vec)}"
+    return model
+
+
+def set_param_in_state(state_dict, param_vec, only_with_grad=False):
+    """ No inplace; only rely on return
+    """
+    start = 0
+    for key, value in state_dict.items():
+        # param_vec.append(value.view(-1).float())
+        end = start + value.view(-1).shape[0]
+        state_dict[key] = torch.clone(param_vec[start:end].view(value.shape))
+        start = end
+    assert (end == len(param_vec)), f"Mismatch in Sizes in set_param : {end} vs {len(param_vec)}"
+    return state_dict
+
 
 
 def get_topK_param(model, K):
@@ -98,29 +127,16 @@ def get_topK_param(model, K):
     return out_vec
 
 
-def set_param_in_model(model, param_vec, only_with_grad=False):
-    start = 0
-    for p in model.parameters():
-        if ( not only_with_grad) or p.requires_grad:
-            end = start + p.numel()
-            p.data.zero_()
-            p.data.add_(param_vec[start:end].view(p.size()))
-            start = end
-    assert (end == len(param_vec)), f"Mismatch in Sizes in set_param : {end} vs {len(param_vec)}"
-    return model
-
 ##==============================================================================
 
 
-class SimpleΞFedAvg():
+class SimpleStateΞFedAvg():
 
-    def __init__(self, cfg, model, device="cpu"):
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
         self.model_0th = copy.deepcopy(model)
 
     #-------- Client methods ----------
-    # @instancemethod  # Local info aggregation Locally
-    def accumulate_locals(self, zxs): # tobe used with in a round/epoch at each client
-        pass
 
     # @instancemethod #Locals calculation to send to Global
     def synopsize_local(self, zxs): #used at end of local round at each client
@@ -145,18 +161,11 @@ class SimpleΞFedAvg():
         model = copy.deepcopy(model_struct)
         if not gset: return model, {}
 
-        model = model_copier(gset["model"]).to(device)
+        model.load_state_dict(gset["model"].state_dict(), strict=True)
+        model = model.to(device)
         ghatch = {}
 
         return model, ghatch
-
-
-    @staticmethod #
-    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
-        """
-        """
-        loss, print_info = torch.tensor(0), {}
-        return loss, print_info
 
 
     #-------- Server methods ----------
@@ -165,29 +174,156 @@ class SimpleΞFedAvg():
     def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
-        if not device: device = next(lsets[-1]["model"].parameters()).device
+        if not device: device = next(self.model_0th.parameters()).device
         for ls in lsets: ls["model"].to(device) #for nn.module .cuda is both inplace and assignable
 
         agg_model = model_copier(lsets[0]["model"])
         local_states = []
         for ls in lsets:
             local_states.append(ls["model"].state_dict())
-        agg_states = global_average_weights(local_states)
+        agg_states = global_average_statedict(local_states)
 
         agg_model.load_state_dict(agg_states)
 
         gset = {"model": agg_model}
         return gset
 
+
+##------------------------------------------------------------------------------
+
+class SimpleParamΞFedAvg():
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.model_0th = copy.deepcopy(model)
+
+    #-------- Client methods ----------
+
+    # @instancemethod #Locals calculation to send to Global
+    def synopsize_local(self, zxs): #used at end of local round at each client
+        """ zxs: {"model", }
+        """
+        lset = {}
+        lset["param_vec"] = get_param_from_state(zxs["model"].state_dict())
+
+        return lset
+
+    #-------- Shared methods ----------
+
+    # @instancemethod #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
+        """ model_struct: torch nn.module object
+            gset: global aggregations {"model", }
+        """
+        model_struct = self.model_0th if not model_struct else model_struct
+        if not device: device = next(model_struct.parameters()).device
+
+        ## since no compression or sketching used
+        model = copy.deepcopy(model_struct).to(device)
+        if not gset: return model, {}
+
+        new_state = set_param_in_state(model.state_dict(), gset["param_vec"])
+        model.load_state_dict(new_state, strict=True)
+        ghatch = {}
+
+        return model, ghatch
+
+
+    #-------- Server methods ----------
+
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
+        """ Return: aggregated stat
+        """
+        if not device: device = next(self.model_0th.parameters()).device
+
+        for ls in lsets: ls["param_vec"].to(device)
+
+        agg_vec = lsets[0]["param_vec"].clone()
+        for ls in lsets[1:]:
+            agg_vec += ls["param_vec"]
+        agg_vec /= len(lsets)
+
+        gset = {"param_vec": agg_vec}
+        return gset
+
+##------------------------------------------------------------------------------
+
+class DeltaParamΞFedAvg():
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.model_tminus_1 = copy.deepcopy(model)
+
+    #-------- Client methods ----------
+
+    # @instancemethod #Locals calculation to send to Global
+    def synopsize_local(self, zxs): #used at end of local round at each client
+        """ zxs: {"model", }
+        """
+        lset = {}
+        newvec = get_param_from_state(zxs["model"].state_dict())
+        oldvec = get_param_from_state(self.model_tminus_1.state_dict())
+        lset["delta_vec"] = newvec - oldvec
+
+        return lset
+
+    #-------- Shared methods ----------
+
+    # @instancemethod #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
+        """ model_struct: torch nn.module object
+            gset: global aggregations {"model", }
+        """
+        model_struct = self.model_tminus_1 if not model_struct else model_struct
+        if not device: device = next(model_struct.parameters()).device
+
+        model = copy.deepcopy(model_struct) # to prevent unintend model changes
+        if not gset: return model, {}
+
+        oldvec = get_param_from_state(self.model_tminus_1.state_dict())
+        newvec = oldvec + gset["delta_vec"].to(device)
+
+        new_state = set_param_in_state(model.state_dict(), newvec)
+        model.load_state_dict(new_state, strict=True)
+
+        self.model_tminus_1 = copy.deepcopy(model)
+        ghatch = {}
+        return model, ghatch
+
+
+    #-------- Server methods ----------
+
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
+        """ Return: aggregated stat
+        """
+        if not device: device = next(self.model_tminus_1.parameters()).device
+
+        for ls in lsets: ls["delta_vec"].to(device)
+
+        agg_vec = lsets[0]["delta_vec"].clone()
+        for ls in lsets[1:]:
+            agg_vec += ls["delta_vec"]
+        agg_vec /= len(lsets)
+
+        gset = {"delta_vec": agg_vec}
+        return gset
+
+
 ##==============================================================================
+
+## NOTE: only statedict will have running BN stat, when accessed as params it wil not showup
+## For sketching using running stat will corrupt that bin to whihc it got mapped
 
 SketchMethodVarient = CountSketchVec
 
 class NaiveΞCountSketch():
 
     #-------- Stateful variables Local ------
-    def __init__(self, cfg, model, device="cpu"):
+    def __init__(self, cfg, id, model, device="cpu"):
         self.device = device
+        self.id = id
         self.model_0th = copy.deepcopy(model)
 
         vec_size = len(get_param_from_model(model))
@@ -200,10 +336,6 @@ class NaiveΞCountSketch():
         print("Naive Sketch implementation")
 
     #-------- Client methods ----------
-
-    # @instancemethod  # Local info aggregation Locally
-    def accumulate_locals(self, zxs): # tobe used with in a round/epoch at each client
-        pass
 
     # @instancemethod #Locals calculation to send to Global
     def synopsize_local(self, zxs): #used at end of local round at each client
@@ -237,13 +369,6 @@ class NaiveΞCountSketch():
         ghatch = {}
         return model, ghatch
 
-    @staticmethod #
-    def compute_local_deviation(zxs, agghatch, cen_id=None): #at each client
-        """
-        """
-        loss, print_info = torch.tensor(0), {}
-        return loss, print_info
-
     #-------- Server methods ----------
 
     # @instancemethod  #Global calculation to send to locals
@@ -271,9 +396,10 @@ class DeltaWeightΞCountSketch(NaiveΞCountSketch):
     """
 
     #-------- Stateful variables Local ------
-    def __init__(self, cfg, model, device="cpu"):
+    def __init__(self, cfg, id, model, device="cpu"):
         super().__init__(cfg, model, device)
         self.device = device
+        self.id = id
         self.model_0th      = copy.deepcopy(model).to(device)
         self.model_tminus_1 = copy.deepcopy(model).to(device)
 
@@ -332,11 +458,13 @@ class DeltaWeightBNΞCountSketch(NaiveΞCountSketch):
     """
 
     #-------- Stateful variables Local ------
-    def __init__(self, cfg, model, device="cpu"):
-        super().__init__(cfg, model, device)
+    def __init__(self, cfg, id, model, device="cpu"):
+        super().__init__(cfg, id, model, device)
         self.device = device
+        self.id = id
         self.model_0th      = copy.deepcopy(model).to(device)
         self.model_tminus_1 = copy.deepcopy(model).to(device)
+
 
         print("Delta Weight Sketch implementation")
 
@@ -411,7 +539,7 @@ class DeltaWeightBNΞCountSketch(NaiveΞCountSketch):
         agg_sketch = agg_sketch / len(lsets)
 
         gset = {"sketch": agg_sketch}
-        gset["BN"] = global_average_weights([l['BN'] for l in lsets], device=device)
+        gset["BN"] = global_average_statedict([l['BN'] for l in lsets], device=device)
         # del lsets
         return gset
 
@@ -421,9 +549,10 @@ class FetchSGDishΞCountSketch(DeltaWeightΞCountSketch):
     """ Thin implementation on FetchSGD: https://arxiv.org/abs/2007.07682 """
 
     #--------- Stateful variables Local -------
-    def __init__(self, cfg, model, device="cpu"):
-        super().__init__(cfg, model, device)
-
+    def __init__(self, cfg, id, model, device="cpu"):
+        super().__init__(cfg, id, model, device)
+        self.device = device
+        self.id = id
         self.rho = 0.9
         self.eta = 0.9
         self.topk_ratio = 0.1

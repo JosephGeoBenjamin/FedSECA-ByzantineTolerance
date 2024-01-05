@@ -16,6 +16,7 @@ import utilities.fedUtils as fedutl
 from utilities.metricUtils import MultiClassMetrics
 
 import algorithms.federation_ops as fedops
+import algorithms.federation_byz as fedbyz
 from algorithms.classifier import ClassifierNet
 
 
@@ -81,10 +82,12 @@ parser.add_argument('--checkpoint-dir', type=str, metavar='PATH',
 
 args = parser.parse_args()
 
+## update keys from json
 if args.load_json:
     with open(args.load_json, 'rt') as f:
         CFG.__dict__.update(json.load(f))
 
+## override json variables with CLI if any
 for arg in vars(args):
     att = getattr(args, arg)
     if att: CFG.__dict__[arg] = att
@@ -181,6 +184,9 @@ def getFedProtocol():
         fedProtocol = fedops.SimpleParamΞFedAvg
     elif CFG.fed_approach == "fedavg+deltaparam":
         fedProtocol = fedops.DeltaParamΞFedAvg
+    elif CFG.fed_approach == "fedavg+byz_noguard":
+        fedProtocol = fedbyz.NoGuardΞByzantine
+
 
     elif CFG.fed_approach == "countsketch+deltaweight":
         fedProtocol = fedops.DeltaWeightΞCountSketch
@@ -416,7 +422,7 @@ def simple_main(model_key=None, folder_suffix=""):
     agghatch        = None   # expanded/desynopsized information w.r.t local model
     global_agghatch = None   # expanded information w.r.t global model
     global_aggset   = None   # synopsized aggregate form global
-    global_fedprtcl = fedProtocol(CFG, global_model, g_device)
+    global_fedprtcl = fedProtocol(CFG, "G", global_model, g_device)
     fed_locals      = {}     # local Models hanger
     for id in traindozers.keys():
         l_device = next(gpuid_generator)
@@ -424,7 +430,7 @@ def simple_main(model_key=None, folder_suffix=""):
                                 lossfunc    = lossfn,
                                 trainloader = traindozers[id],
                                 validloader = validdozers[id],
-                                fedprtcl    = fedProtocol(CFG, global_model, l_device),
+                                fedprtcl    = fedProtocol(CFG, id, global_model, l_device),
                                 device      = l_device
                                 )
         fed_locals[id].update_parameters(global_model, agghatch=agghatch) #deepcopies inside

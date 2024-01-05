@@ -74,10 +74,12 @@ parser.add_argument('--checkpoint-dir', type=str, metavar='PATH',
 
 args = parser.parse_args()
 
+## update keys from json
 if args.load_json:
     with open(args.load_json, 'rt') as f:
         CFG.__dict__.update(json.load(f))
 
+## override json variables with CLI if any
 for arg in vars(args):
     att = getattr(args, arg)
     if att: CFG.__dict__[arg] = att
