@@ -2,6 +2,9 @@
 
 import copy
 import torch
+import torch.nn.functional as torch_F
+import scipy
+import pyod
 import algorithms.federation_ops as fedops
 
 
@@ -143,7 +146,8 @@ class NoGuardΞByzantine():
             local_states.append(ls["model"].state_dict())
         agg_states = fedops.global_average_statedict(local_states)
 
-        return agg_states
+        info_dict = {"client_weights":[1/len(lsets)]*len(lsets)}
+        return agg_states, info_dict
 
 
     # @instancemethod  #Global calculation to send to locals
@@ -155,11 +159,11 @@ class NoGuardΞByzantine():
 
         agg_model = fedops.model_copier(lsets[0]["model"])
 
-        agg_states = self.aggregator_func(lsets)
+        agg_states, select_info = self.aggregator_func(lsets)
 
         agg_model.load_state_dict(agg_states)
 
-        gset = {"model": agg_model}
+        gset = {"model": agg_model, "client_select": select_info}
         return gset
 
 
@@ -167,7 +171,10 @@ class NoGuardΞByzantine():
 
 
 class KrumΞByzantine(NoGuardΞByzantine):
+    """
+    Work: https://papers.nips.cc/paper_files/paper/2017/hash/f4b9ec30ad9f68f89b29639786cb62ef-Abstract.html
 
+    """
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
         self.device = device
@@ -222,7 +229,79 @@ class KrumΞByzantine(NoGuardΞByzantine):
         final_wvec /= len(midxs)
 
         agg_states = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
-        return agg_states
+
+
+        info_dict = {"client_weights": [ 1/len(midxs) if i in midxs else 0
+                                        for i in range(len(lsets))]
+                    }
+        return agg_states, info_dict
+
+
+##------------------------------------------------------------------------------
+
+from pyod.models.copod import COPOD
+
+class CopodDosΞByzantine(NoGuardΞByzantine):
+    """
+    Work: https://arxiv.org/abs/2207.10804
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.num_client_k = int(cfg.data_centers_count) # K
+        self.model_0th = copy.deepcopy(model)
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+
+        self.aggregator_func = self.__dos_aggregation
+        self.cpd_l2 = COPOD()
+        self.cpd_cs = COPOD()
+        print("Defense: Copod-DOS")
+
+
+        if len(self.byztn_cfg) != 0:
+            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+            if id in byz_clients:
+                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                print("Byz Method", self.byztn_cfg["byztn_method"])
+
+
+
+    #-------- Server methods ----------
+
+    def __dos_aggregation(self, lsets):
+        wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        l2_dists = []
+        cs_dists = []
+        for v in wvecs:
+            l2_dists.append(torch.norm(stacked_wvec-v, dim=1))
+            cs_dists.append(1-torch_F.cosine_similarity(stacked_wvec,
+                                                      v.view(1, -1), dim=1))
+        l2_dists = torch.vstack(l2_dists).cpu()
+        cs_dists = torch.vstack(cs_dists).cpu()
+
+        self.cpd_l2.fit(l2_dists)
+        self.cpd_cs.fit(cs_dists)
+
+        abnorm_score = (self.cpd_l2.decision_function(l2_dists) + \
+                        self.cpd_cs.decision_function(cs_dists))
+        abnorm_score = torch.tensor(abnorm_score).view(-1, 1)
+
+        cweigh = torch_F.softmax(-1*abnorm_score,dim=0)
+        cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+
+        final_wvec = torch.sum(cweighed_wvec, axis = 0)
+
+        agg_states = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
+
+        info_dict = {"client_weights":cweigh.flatten().tolist()}
+        return agg_states, info_dict
 
 
 ##------------------------------------------------------------------------------

@@ -325,10 +325,8 @@ class ClsFedHandler(object):
 
         if ANALYSE_MODELS:
             diff_dict = fedutl.find_layerwise_weight_difference(model, model_start)
-
-            diff_dict["client"] = self.id
-            diff_dict["epoch"] = epoch
-            lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/train-weight-difference.txt', console=False)
+            diff_dict.update({"client": self.id, "epoch":epoch})
+            lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/trainAnsys-Wdiff[g]-epochwise.txt', console=False)
 
             model_diff_vec = fedops.get_param_from_model(model, only_with_grad=False) \
                                 - fedops.get_param_from_model(model_start, only_with_grad=False)
@@ -495,8 +493,11 @@ def simple_main(model_key=None, folder_suffix=""):
                 diff_cos_sim.append(difcos)
             dists_dict = {"epoch": itr,
                         "diff_l2norm":diff_l2_norm, "diff_cosine": diff_cos_sim}
+            lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 
-            lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/train-weight-simMatrix.txt', console=False)
+            cselect_dict = global_aggset.get("client_select")
+            cselect_dict.update({"epoch":itr})
+            lutl.LOG2DICTXT(cselect_dict, CFG.gLogPath +'/trainAnsys-client-selection.txt', console=False)
         ## end >>>>> analyse_models
 
 
