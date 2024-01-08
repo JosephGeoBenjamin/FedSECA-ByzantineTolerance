@@ -16,15 +16,20 @@ import utilities.logUtils as lutl
 from sketching.count_sketch import CountSketchVec
 from sketching.race_sketch import RaceSketchVec
 
+from sklearn.metrics.pairwise import cosine_similarity
 
 print(f"Pytorch version: {torch.__version__}")
 print(f"cuda version: {torch.version.cuda}")
 
 ##============================= Configure and Setup ============================
 
-CFG = rutl.ObjDict(
+os.environ['CUDA_PATH'] = '/home/joseph.benjamin/.conda/envs/sfed/' #for sinkhorn
+from sketching.sinkhorn_metric import sinkhorn_pointcloud_pytorch
 
-checkpoint_dir= "hypotheses/DataSketchColl/trail-003/",
+
+CFG = rutl.ObjDict(
+    cloud_point_count = 1000,
+    checkpoint_dir= "hypotheses/DataSketchColl/main-001/1K-pts/",
 )
 
 ### ----------------------------------------------------------------------------
@@ -131,6 +136,13 @@ def tensor_cov(tensor, rowvar=True, bias=False):
     return factor * tensor @ tensor.transpose(-1, -2).conj()
 
 
+def min_max_scale(data):
+    min_val = np.min(data)
+    max_val = np.max(data)
+    scaled_data = (data - min_val) / (max_val - min_val)
+    return scaled_data
+
+
 class ModelFeatureMean():
     def __init__(self, model_name ,weight_path=None ,device="cuda") -> None:
         self.model = getModel(model_name)
@@ -181,11 +193,15 @@ class ModelFeatureCovariance():
         return res.detach().cpu().numpy()
 
 
+
+
 class ModelFeatureGaussDistribution():
-    def __init__(self, model_name, weight_path=None, classwise=False ,device="cuda") -> None:
+    def __init__(self, model_name, total_points=500, weight_path=None, classwise=False ,device="cuda") -> None:
         self.model = getModel(model_name)
         self.model = self.model.to(device)
         self.model.fc = torch.nn.Identity()
+
+        self.total_points = total_points
 
         if weight_path: self.model = pretrained_weight_loader(self.model, weight_path)
 
@@ -233,11 +249,11 @@ class ModelFeatureGaussDistribution():
                 cov_list.append(c_cov)
                 mean_list.append(c_mean)
                 walpha_list.append(c_walpha)
-            data_points = self._generate_mixture_of_gaussians(mean_list, cov_list, walpha_list, 1000)
+            data_points = self._generate_mixture_of_gaussians(mean_list, cov_list, walpha_list, self.total_points)
 
         else:
             f_mean, f_cov = self._find_mean_cov(self.full_featp_holder)
-            data_points = np.random.multivariate_normal(f_mean, f_cov, 5000)
+            data_points = np.random.multivariate_normal(f_mean, f_cov, self.total_points)
 
         return data_points
 
@@ -255,6 +271,53 @@ class ModelFeatureGaussDistribution():
                 means_list[i], covs_list[i], num_samples)
 
         return data_points
+
+
+    @classmethod
+    def compute_distance_matrix(cls, hdf5_file_path):
+
+        print("Computing Distance Matrix for Datasets")
+
+        # Read the HDF5 file
+        with h5py.File(hdf5_file_path, 'r') as hdf5_file:
+            # Get a list of all dataset names (keys)
+            dataset_keys = list(hdf5_file.keys())
+
+            # Initialize an empty DataFrame to store L2 norm distances
+            # df_distances = pd.DataFrame(index=dataset_keys, columns=dataset_keys)
+            df_distances = np.zeros((len(dataset_keys), len(dataset_keys)))
+
+
+            # Calculate L2 norm distances between arrays
+            for key1 in tqdm(dataset_keys):
+                for key2 in dataset_keys:
+                    # Access array data
+
+                    array1 = hdf5_file[key1][()]
+                    array2 = hdf5_file[key2][()]
+
+                    # Calculate L2 norm distance
+                    # distance = np.linalg.norm(min_max_scale(array1) - min_max_scale(array2))
+
+                    # Calculate Cosine Sim distance
+                    # distance = cosine_similarity(array1, array2)[0, 0]
+
+                    # Calculate SinkHorn distance
+                    distance = sinkhorn_pointcloud_pytorch(torch.tensor(array1, device="cuda"),
+                                                torch.tensor(array2, device="cuda"),
+                                                )
+                    distance = distance[0].item()
+
+                    #last idx will be distance based entire data for reference purpose
+                    i = int(key1) if key1 != "all" else len(dataset_keys)-1
+                    j = int(key2) if key2 != "all" else len(dataset_keys)-1
+                    # Store the distance in the DataFrame
+                    df_distances[i, j] = distance
+
+        return df_distances
+
+
+
 
 
 class Image_Histogram():
@@ -335,25 +398,26 @@ def getSketcher(cfg):
     img_size = cfg.image_size
     channels = 3 if not cfg.channels else cfg.channels
     sketcher_dict = {
-        "feature-only": ModelFeatureMean(model_name=cfg.model,
-                                        weight_path=cfg.weight_path,
-                                        device="cuda"),
-        "feature-Covar": ModelFeatureCovariance(model_name=cfg.model,
-                                                weight_path=cfg.weight_path,
-                                                device="cuda"),
+        # "feature-only": ModelFeatureMean(model_name=cfg.model,
+        #                                 weight_path=cfg.weight_path,
+        #                                 device="cuda"),
+        # "feature-Covar": ModelFeatureCovariance(model_name=cfg.model,
+        #                                         weight_path=cfg.weight_path,
+        #                                         device="cuda"),
 
         "feature-Gauss": ModelFeatureGaussDistribution( model_name=cfg.model,
                                                     weight_path=cfg.weight_path,
                                                     classwise=False, device="cuda"),
         "feature-GaussMixture": ModelFeatureGaussDistribution(model_name=cfg.model,
-                                                        weight_path=cfg.weight_path,
-                                                        classwise=True, device="cuda"),
+                                                    total_points=cfg.cloud_point_count,
+                                                    weight_path=cfg.weight_path,
+                                                    classwise=True, device="cuda"),
 
-        "feature-CountSketch": Feature_CountSketching(model_name=cfg.model,
-                                                      weight_path=cfg.weight_path,
-                                                      device="cuda"),
+        # "feature-CountSketch": Feature_CountSketching(model_name=cfg.model,
+        #                                               weight_path=cfg.weight_path,
+        #                                               device="cuda"),
         # "image-Histogram" : Image_Histogram(img_size,  channels=channels,device="cuda"),
-        "image-CountSketch": Image_CountSketching(img_size, channels=channels,device="cuda"),
+        # "image-CountSketch": Image_CountSketching(img_size, channels=channels,device="cuda"),
 
     }
     return sketcher_dict[cfg.sketch_method]
@@ -375,8 +439,9 @@ def data_sketch_main(cfg, file_suffix=""):
     h5path = f"{sfolderpath}/{cfg.dataset}{cfg.dataset_type}-C{cfg.data_centers_count}-{file_suffix}.h5"
     h5file = h5py.File(h5path,"w")
 
-    center_list = ["all"] + list(range(cfg.data_centers_count))
 
+    ### Centerwise data distribution / sketch
+    center_list = ["all"] + list(range(cfg.data_centers_count))
 
     for center_index in center_list:
         laoder_list = []
@@ -407,8 +472,18 @@ def data_sketch_main(cfg, file_suffix=""):
         h5file.create_dataset(str(center_index), data=sketcher.get_full_aggregate(),
                               dtype=float)
         del sketcher
-
     h5file.close()
+
+    ### Compute Distance Matrix
+    gsketcher = getSketcher(cfg)
+    dist_matrix = gsketcher.compute_distance_matrix(h5path)
+
+    with h5py.File(h5path, 'a') as hdf5_file:
+        hdf5_file.create_dataset("dist_matrix",
+                                data=dist_matrix,
+                                dtype=float)
+
+
     return h5path
 
 
@@ -418,23 +493,29 @@ def data_sketch_main(cfg, file_suffix=""):
 
 def run_for_cifar100():
     CFG.dataset   = "CIFAR100"
-    weight_root_path = "hypotheses/ClsX-cifar-OldTorch/Ex00-Cls-baseline--lr1e-3"
+
+    weight_root_path = "/home/joseph.benjamin/WERK/fed-cvpr/fed-sketch/hypotheses/Cls1-cifar/Ex00-Cls-base_IID-002/"
 
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar100-jfed/"
     CFG.data_centers_count = 10
     CFG.image_size = 224
 
-    for alp in [1000, 100, 10, 1, 0]:  #0.5]
-            CFG.dirichlet_alpha = alp
-            if weight_root_path:
-                CFG.weight_root_path = f"{weight_root_path}/{alp}_aleph/"
-            data_sketch_main(CFG, file_suffix=f"{alp}-")
+    # for alp in [1000, 100, 10, 1, 0]:  #0.5]
+    #         CFG.dirichlet_alpha = alp
+    #         if weight_root_path:
+    #             CFG.weight_root_path = f"{weight_root_path}/{alp}_aleph/"
+    #         data_sketch_main(CFG, file_suffix=f"{alp}-")
 
+    for alp in ["non", "full", "semi-mix", "semi-pure"]:
+            if weight_root_path:
+                CFG.weight_root_path = f"{weight_root_path}/{alp}_iid/"
+            CFG.iid_ness = alp
+            data_sketch_main(CFG, file_suffix=f"{alp}-")
 
 
 def run_for_isicflamby():
     CFG.dataset   = "ISIC"
-    CFG.weight_root_path = "hypotheses/Cls1-isic/E00-Cls-Baseline-01/"
+    CFG.weight_root_path = "hypotheses/Cls1-isic/E00-Cls-Resnet_Baseline-01"
 
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed/"
     CFG.data_centers_count = 6
@@ -473,6 +554,7 @@ def run_for_mnist():
 
 
 if __name__ == '__main__':
+    CFG.dataset_type = "" ##for default
 
     # CFG.sketch_method = "feature-only"
     # CFG.sketch_method = "feature-Covar"
@@ -485,9 +567,9 @@ if __name__ == '__main__':
     # CFG.sketch_method = "image-Histogram"
     # CFG.sketch_method = "imagepix-RaceSketch"
 
-    run_for_mnist()
+    # run_for_mnist()
     # run_for_cifar100()
-    # run_for_isicflamby()
+    run_for_isicflamby()
 
 
 

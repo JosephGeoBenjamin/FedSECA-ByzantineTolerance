@@ -20,7 +20,12 @@
     "defense_method" : "KrumΞByzantine",
     "multikrum_m"    : 1,
     "num_assumed_byz": 2
+    },
+
+    {
+    "defense_method" : "CopodDosΞByzantine"
     }
+
 
 
 ]
