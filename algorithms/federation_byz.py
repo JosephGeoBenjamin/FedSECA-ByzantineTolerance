@@ -5,6 +5,7 @@ import h5py
 
 import torch
 import torch.nn.functional as torch_F
+import numpy as np
 import scipy
 import pyod
 import algorithms.federation_ops as fedops
@@ -148,7 +149,7 @@ class NoGuardΞByzantine():
             local_states.append(ls["model"].state_dict())
         agg_states = fedops.global_average_statedict(local_states)
 
-        info_dict = {"client_weights":[1/len(lsets)]*len(lsets)}
+        info_dict = {"client_weightage":[1/len(lsets)]*len(lsets)}
         return agg_states, info_dict
 
 
@@ -256,7 +257,7 @@ class NoGuardΞByzantineDecopl():
                           for i in range(len(lsets))}
         agg_states_cli.update({"client_G": copy.deepcopy(agg_states)}) #Global Model
 
-        info_dict = {"client_weights":[[1/len(lsets)]*len(lsets)]*len(lsets)}
+        info_dict = {"client_weightage":[[1/len(lsets)]*len(lsets)]*len(lsets)}
         return agg_states_cli, info_dict
 
 
@@ -340,7 +341,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
         agg_states = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
 
 
-        info_dict = {"client_weights": [ 1/len(midxs) if i in midxs else 0
+        info_dict = {"client_weightage": [ 1/len(midxs) if i in midxs else 0
                                         for i in range(len(lsets))]
                     }
         return agg_states, info_dict
@@ -409,7 +410,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
         agg_states = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
 
-        info_dict = {"client_weights":cweigh.flatten().tolist()}
+        info_dict = {"client_weightage":cweigh.flatten().tolist()}
         return agg_states, info_dict
 
 
@@ -420,10 +421,35 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
 ##==============================================================================
 
+def remove_diagonal(x):
+    n, m = x.shape
+    assert n == m
+    x = x.flatten()[:-1].reshape(n - 1, n + 1)[:, 1:].flatten()
+    x= x.reshape(n, n-1)
+    return x
 
-def symmetrize_dist_matrix(dmat):
-    outmat = (dmat + dmat.T) / 2
-    return outmat
+def insert_diagonal(x, D = 0.0):
+    n, m = x.shape
+    x = x.flatten().reshape(n - 1, n)
+    x = np.hstack([ D*np.ones((n-1, 1)), x])
+    x = np.hstack([x.flatten(), np.array([D])])
+    x= x.reshape(n, n)
+    return x
+
+def torch_remove_diagonal(x):
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+def torch_insert_diagonal(x, D = 0.0):
+    n, m = x.shape
+    x = x.flatten().reshape(n - 1, n)
+    x = torch.hstack([ D*torch.ones((n-1, 1)), x])
+    x = torch.hstack([x.flatten(), torch.tensor([D])])
+    x = x.reshape(n, n)
+    return x
+
+##------------------------------------------------------------------------------
 
 
 class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
@@ -438,16 +464,13 @@ class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
 
-        self.aggregator_func = self.__softmin_aggregation
+        self.aggregator_func = self.__dataweightage_aggregation_decopld
 
         with h5py.File(self.defense_cfg["datasummary"], 'r') as hdf5_file:
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        normed_dist = (data_dist - data_dist.min(axis=1, keepdims=True)) /  \
-            (data_dist.max(axis=1, keepdims=True) - data_dist.min(axis=1, keepdims=True))
-
-        self.softmined = torch_F.softmin(torch.tensor(normed_dist), dim=1)
+        self.client_weightage = self._alphabeta_softmin_weightage(data_dist)
 
         print("Defense: Decoupled softmin-SKHD")
 
@@ -459,10 +482,40 @@ class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
                 print("Byz Method", self.byztn_cfg["byztn_method"])
 
 
+    def _distance_softmin_weightage(self, data_dist):
+        normed_dist = (data_dist - data_dist.min(axis=1, keepdims=True)) /  \
+            (data_dist.max(axis=1, keepdims=True) - data_dist.min(axis=1, keepdims=True))
+
+        weightage_matrix = torch_F.softmin(torch.tensor(normed_dist), dim=1)
+        return weightage_matrix
+
+    def _alphabeta_softmin_weightage(self, data_dist):
+
+        data_dist = (data_dist + data_dist.T) /2  # symmetrize
+        # data_dist = np.abs(data_dist - data_dist.T) # delta of pairs
+
+        # remove client_i from softmin computation
+        data_dist = remove_diagonal(data_dist)
+
+        normed_dist = (data_dist - data_dist.min(axis=1, keepdims=True)) /  \
+                    (data_dist.max(axis=1, keepdims=True) - data_dist.min(axis=1, keepdims=True))
+
+        ## softmined to get Beta for client_j ,where j!=i
+        softmined = torch_F.softmin(torch.tensor(normed_dist), dim=1)#.numpy()
+
+        diag_out = torch_insert_diagonal(softmined).clone()
+
+        ## compute alpha for client_i based on importance across columns
+        alpha = ( diag_out.sum(dim=0)/ (diag_out.shape[0]-1) )
+
+        weightage_matrix = ((1-alpha) * diag_out +
+                    alpha * torch.eye(diag_out.shape[0], dtype=float).to_dense())
+
+        return weightage_matrix
 
     #-------- Server methods ----------
 
-    def __softmin_aggregation(self, lsets):
+    def __dataweightage_aggregation_decopld(self, lsets):
         wvecs = [fedops.get_param_from_state(l["model"].state_dict())
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
@@ -471,7 +524,7 @@ class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         agg_states_cli = {}
         state_dict_struct = copy.deepcopy(lsets[0]["model"].state_dict())
         for i in range(len(lsets)):
-            cweigh = self.softmined[0].view(-1, 1)
+            cweigh = self.client_weightage[0].view(-1, 1)
             cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
             cli_wvec = torch.sum(cweighed_wvec, axis = 0)
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
@@ -481,5 +534,5 @@ class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         agg_states = fedops.set_param_in_state(state_dict_struct, out_ref_wvec.mean(dim=0))
         agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
 
-        info_dict = {"client_weights":self.softmined.tolist()}
+        info_dict = {"client_weightage":self.client_weightage.tolist()}
         return agg_states_cli, info_dict
