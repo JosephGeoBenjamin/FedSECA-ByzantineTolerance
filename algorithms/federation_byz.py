@@ -1,6 +1,8 @@
 # Ξ - chi used as underscore in Classes
 
 import copy
+import h5py
+
 import torch
 import torch.nn.functional as torch_F
 import scipy
@@ -412,3 +414,72 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
 
 ##------------------------------------------------------------------------------
+
+
+
+
+##==============================================================================
+
+
+def symmetrize_dist_matrix(dmat):
+    outmat = (dmat + dmat.T) / 2
+    return outmat
+
+
+class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.num_client_k = int(cfg.data_centers_count) # K
+        self.model_0th = copy.deepcopy(model)
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+
+        self.aggregator_func = self.__softmin_aggregation
+
+        with h5py.File(self.defense_cfg["datasummary"], 'r') as hdf5_file:
+            data_dist = hdf5_file["dist_matrix"][()]
+            data_dist = data_dist[:-1, :-1] # ignore all distances
+
+        normed_dist = (data_dist - data_dist.min(axis=1, keepdims=True)) /  \
+            (data_dist.max(axis=1, keepdims=True) - data_dist.min(axis=1, keepdims=True))
+
+        self.softmined = torch_F.softmin(torch.tensor(normed_dist), dim=1)
+
+        print("Defense: Decoupled softmin-SKHD")
+
+
+        if len(self.byztn_cfg) != 0:
+            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+            if id in byz_clients:
+                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                print("Byz Method", self.byztn_cfg["byztn_method"])
+
+
+
+    #-------- Server methods ----------
+
+    def __softmin_aggregation(self, lsets):
+        wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        out_ref_wvec = torch.zeros_like(stacked_wvec)
+
+        agg_states_cli = {}
+        state_dict_struct = copy.deepcopy(lsets[0]["model"].state_dict())
+        for i in range(len(lsets)):
+            cweigh = self.softmined[0].view(-1, 1)
+            cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            cli_wvec = torch.sum(cweighed_wvec, axis = 0)
+            agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
+            agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
+            out_ref_wvec[i, :] = cli_wvec
+
+        agg_states = fedops.set_param_in_state(state_dict_struct, out_ref_wvec.mean(dim=0))
+        agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
+
+        info_dict = {"client_weights":self.softmined.tolist()}
+        return agg_states_cli, info_dict

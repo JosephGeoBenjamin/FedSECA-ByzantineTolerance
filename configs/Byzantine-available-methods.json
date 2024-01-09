@@ -13,7 +13,8 @@
 
 
     {
-    "defense_method" : "NoGuardΞByzantine"
+    "0_defense_method" : "NoGuardΞByzantine",
+    "1_defense_method" : "NoGuardΞByzantineDecopl"
     },
 
     {
@@ -24,9 +25,12 @@
 
     {
     "defense_method" : "CopodDosΞByzantine"
+    },
+
+    {
+    "defense_method"  : "SoftminSKDHΞByzantineDecopl",
+    "datasummary" : "path/to/hdf5/with/dist_matrix/key.h5"
     }
-
-
 
 ]
 
