@@ -49,6 +49,9 @@ enable_scheduler = True,
 enable_weight_reinit = True, # FedAvg protocol, true in general cases
 fed_approach = "fedavg",
 
+enable_fedprox = False,
+fedprox_mu     = 0.5,
+
 reg_method   = "NONE",
 reg_coeff    = 0.0,
 
@@ -496,8 +499,9 @@ def simple_main(model_key=None, folder_suffix=""):
             lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 
             cselect_dict = global_aggset.get("client_select")
-            cselect_dict.update({"epoch":itr})
-            lutl.LOG2DICTXT(cselect_dict, CFG.gLogPath +'/trainAnsys-client-selection.txt', console=False)
+            if cselect_dict:
+                cselect_dict.update({"epoch":itr})
+                lutl.LOG2DICTXT(cselect_dict, CFG.gLogPath +'/trainAnsys-client-selection.txt', console=False)
         ## end >>>>> analyse_models
 
 
@@ -559,10 +563,13 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
 
-def simple_test(saved_logpath, model_list=["global_model"]):
+def simple_test(saved_logpath, model_list=["global_model"],
+                epochs_ran=None, folder_suffix=""):
 
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
+
+    dir_to_save = saved_logpath+folder_suffix
 
     ### MODEL
     model = ClassifierNet(arch=CFG.featx_arch,
@@ -584,12 +591,12 @@ def simple_test(saved_logpath, model_list=["global_model"]):
         for p_k, pth_wgt in pth_list.items():
             ret_msg = model.load_state_dict(pth_wgt, strict=False)
             lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
-                        CFG.gLogPath +'/misc.txt')
+                        dir_to_save +'/misc.txt')
 
             test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
             for c in ["all"]+ list(range(test_center_num)):
                 testloader = getDataLoaders(CFG, center_index=c, type="test")
-                testMetric = MultiClassMetrics(saved_logpath+ f"/metrics/{p_k}-test")
+                testMetric = MultiClassMetrics(dir_to_save+ f"/metrics/{p_k}-test")
                 model.eval()
 
                 start_time = time.time()
@@ -606,6 +613,7 @@ def simple_test(saved_logpath, model_list=["global_model"]):
                             model_name  = m,
                             model_type  = p_k,
                             test_center = c,
+                            epochs_ran  = epochs_ran,
                             timetaken   = int(time.time() - start_time),
                             ctime       = time.ctime(),
                             testf1scr   = testMetric.get_f1score(),
@@ -616,7 +624,7 @@ def simple_test(saved_logpath, model_list=["global_model"]):
                             testconfus  = testMetric.get_confusion_matrix(
                                     save_png= True, title=log_title).tolist(),
                         )
-                    lutl.LOG2DICTXT(detail_logs, saved_logpath+'/test-results.txt',
+                    lutl.LOG2DICTXT(detail_logs, dir_to_save+'/test-results.txt',
                                     console=True)
 
                     testMetric._write_predictions(title=log_title)
