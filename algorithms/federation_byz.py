@@ -421,14 +421,14 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
 ##==============================================================================
 
-def remove_diagonal(x):
+def remove_diagonal(x): #contract along dim=1
     n, m = x.shape
     assert n == m
     x = x.flatten()[:-1].reshape(n - 1, n + 1)[:, 1:].flatten()
     x= x.reshape(n, n-1)
     return x
 
-def insert_diagonal(x, D = 0.0):
+def insert_diagonal(x, D = 0.0): #expand along dim=1
     n, m = x.shape
     x = x.flatten().reshape(n - 1, n)
     x = np.hstack([ D*np.ones((n-1, 1)), x])
@@ -436,14 +436,16 @@ def insert_diagonal(x, D = 0.0):
     x= x.reshape(n, n)
     return x
 
-def torch_remove_diagonal(x):
+def torch_remove_diagonal(x): #contract along dim=1
     n, m = x.shape
     assert n == m
-    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+    x = x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+    x = x.reshape(n, n-1)
+    return x
 
-def torch_insert_diagonal(x, D = 0.0):
+def torch_insert_diagonal(x, D = 0.0): #expand along dim=1
     n, m = x.shape
-    x = x.flatten().reshape(n - 1, n)
+    x = x.flatten().view(n - 1, n)
     x = torch.hstack([ D*torch.ones((n-1, 1)), x])
     x = torch.hstack([x.flatten(), torch.tensor([D])])
     x = x.reshape(n, n)
@@ -452,7 +454,7 @@ def torch_insert_diagonal(x, D = 0.0):
 ##------------------------------------------------------------------------------
 
 
-class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
+class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -472,7 +474,7 @@ class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         self.client_weightage = self._alphabeta_softmin_weightage(data_dist)
 
-        print("Defense: Decoupled softmin-SKHD")
+        print("Defense: Decoupled WeighOmega-SKHD")
 
 
         if len(self.byztn_cfg) != 0:
@@ -483,25 +485,31 @@ class SoftminSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
 
     def _distance_softmin_weightage(self, data_dist):
-        normed_dist = (data_dist - data_dist.min(axis=1, keepdims=True)) /  \
-            (data_dist.max(axis=1, keepdims=True) - data_dist.min(axis=1, keepdims=True))
+        data_dist = torch.tensor(data_dist)
+
+        normed_dist = (data_dist - data_dist.min(dim=1, keepdim=True)[0]) /  \
+                    (data_dist.max(dim=1, keepdim=True)[0] - data_dist.min(dim=1, keepdim=True)[0])
 
         weightage_matrix = torch_F.softmin(torch.tensor(normed_dist), dim=1)
         return weightage_matrix
 
     def _alphabeta_softmin_weightage(self, data_dist):
-
+        """ data_dist: numpy arr
+        return : torch.tensor
+        """
         data_dist = (data_dist + data_dist.T) /2  # symmetrize
         # data_dist = np.abs(data_dist - data_dist.T) # delta of pairs
 
-        # remove client_i from softmin computation
-        data_dist = remove_diagonal(data_dist)
+        data_dist = torch.tensor(data_dist)
 
-        normed_dist = (data_dist - data_dist.min(axis=1, keepdims=True)) /  \
-                    (data_dist.max(axis=1, keepdims=True) - data_dist.min(axis=1, keepdims=True))
+        # remove client_i from softmin computation
+        data_dist = torch_remove_diagonal(data_dist)
+
+        normed_dist = (data_dist - data_dist.min(dim=1, keepdim=True)[0]) /  \
+                    (data_dist.max(dim=1, keepdim=True)[0] - data_dist.min(dim=1, keepdim=True)[0])
 
         ## softmined to get Beta for client_j ,where j!=i
-        softmined = torch_F.softmin(torch.tensor(normed_dist), dim=1)#.numpy()
+        softmined = torch_F.softmin(normed_dist, dim=1)#.numpy()
 
         diag_out = torch_insert_diagonal(softmined).clone()
 

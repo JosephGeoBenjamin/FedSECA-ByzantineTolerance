@@ -28,7 +28,7 @@
     },
 
     {
-    "defense_method"  : "SoftminSKDHΞByzantineDecopl",
+    "defense_method"  : "WeighOmegaSKDHΞByzantineDecopl",
     "datasummary" : "path/to/hdf5/with/dist_matrix/key.h5"
     }
 
