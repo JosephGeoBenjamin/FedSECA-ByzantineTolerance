@@ -567,7 +567,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         # alpha_ii = torch.max(beta_ij, dim=1)[0]
 
         ## constant alpha
-        alpha_ii = 0.9/ data_dist.shape[0] #approx 0.25 for isic
+        alpha_ii = 1.5/ data_dist.shape[0] #approx 0.25 for isic
 
         # omega_ij full
         weightage_matrix = ((1-alpha_ii) * beta_ij +
@@ -586,7 +586,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         agg_states_cli = {}
         state_dict_struct = copy.deepcopy(lsets[0]["model"].state_dict())
         for i in range(len(lsets)):
-            cweigh = self.client_weightage[0].view(-1, 1)
+            cweigh = self.client_weightage[i].view(-1, 1)
             cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
             cli_wvec = torch.sum(cweighed_wvec, axis = 0)
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
