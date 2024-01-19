@@ -497,34 +497,6 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         weightage_matrix = torch_F.softmin(torch.tensor(normed_dist), dim=1)
         return weightage_matrix
 
-    def _alphabeta_softmin_weightage(self, data_dist):
-        """ data_dist: numpy arr
-        return : torch.tensor
-        """
-        data_dist = (data_dist + data_dist.T) /2  # symmetrize
-        # data_dist = np.abs(data_dist - data_dist.T) # delta of pairs
-
-        data_dist = torch.tensor(data_dist)
-
-        # remove client_i from softmin computation
-        data_dist = torch_remove_diagonal(data_dist)
-
-        normed_dist = (data_dist - data_dist.min(dim=1, keepdim=True)[0]) /  \
-                    (data_dist.max(dim=1, keepdim=True)[0] - data_dist.min(dim=1, keepdim=True)[0])
-
-        ## softmined to get Beta for client_j ,where j!=i
-        softmined = torch_F.softmin(normed_dist, dim=1)#.numpy()
-
-        diag_out = torch_insert_diagonal(softmined).clone()
-
-        ## compute alpha for client_i based on importance across columns
-        alpha = ( diag_out.sum(dim=0)/ (diag_out.shape[0]-1) )
-
-        weightage_matrix = ((1-alpha) * diag_out +
-                    alpha * torch.eye(diag_out.shape[0], dtype=float).to_dense())
-
-        return weightage_matrix
-
 
     def _boltzman_factor_weightage(self, data_dist):
         """ Follows Boltzman Distribution paradigm
@@ -539,7 +511,8 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         ## 90th - 1.282 | 95th - 1.645 | 99th - 2.326 | 75th - 0.674
         sigz = 1.645
-        ## Compute Temperature
+
+        ## COMPUTE Temperature
         non_diag = torch_remove_diagonal(data_dist)
         dist_mu = torch.mean(non_diag)
         sigma = torch.std(non_diag)
@@ -547,7 +520,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         dist_max, dist_min = dist_mu+sigz*sigma, dist_mu-sigz*sigma
         tempK = (dist_max - dist_min) / (np.log(1/6) - np.log(5/6))
 
-        ## compute beta_ij
+        ### COMPUTE beta_ij
         softin_beta = non_diag / tempK
         beta_ij = torch.softmax(softin_beta, dim=1)
 
@@ -560,7 +533,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         beta_ij = torch_insert_diagonal(beta_ij)
 
-        ## Compute alpha_ii
+        ### COMPUTE alpha_ii
         # drowmean = (data_dist.sum(dim=0)/(data_dist.shape[0]-1))
         # softin_alpha = drowmean / tempK
         # alpha_ii = torch.softmax(softin_alpha, dim=0)

@@ -110,6 +110,10 @@ def save_current_configs(cfg):
     with open(os.path.realpath(__file__), "r") as pymain:
         file_contents = pymain.read()
         file_contents = str(datetime.datetime.now()) +"\n"+file_contents
+
+    with open(os.path.realpath(fedbyz.__file__), "r") as pymain:
+        file_contents += pymain.read()
+
     with open(cfg.gLogPath+"/python-main.txt", "a") as save_text:
         save_text.write(file_contents)
 
