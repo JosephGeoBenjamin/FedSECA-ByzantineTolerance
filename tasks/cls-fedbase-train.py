@@ -33,11 +33,12 @@ data_root_path  = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed",
 data_centers_count = 6,
 test_partitions = 6,
 override_csv = None,
+seed = 73,
 
 ## Fed specifics
 dirichlet_alpha = None, # for Cifar100
 
-epochs        = 100,
+global_rounds = 100, #Epochs
 image_size    = 200,
 batch_size    = 64,
 workers       = 2,
@@ -66,6 +67,7 @@ clsfy_dropout  = 0.0,
 
 print_freq_lstep = 0,
 ckpt_freq_Gstep  = 1,
+test_last_E_epochs = 5,
 
 checkpoint_dir= "hypotheses/#dummy-run/trail-001",
 resume_training=False
@@ -329,7 +331,7 @@ class ClsFedHandler(object):
         if ANALYSE_MODELS:
             diff_dict = fedutl.find_layerwise_weight_difference(model, model_start)
             diff_dict.update({"client": self.id, "epoch":epoch})
-            lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/trainAnsys-Wdiff[g]-epochwise.txt', console=False)
+            lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/trainAnsys-Wdiff_g-epochwise.txt', console=False)
 
             model_diff_vec = fedops.get_param_from_model(model, only_with_grad=False) \
                                 - fedops.get_param_from_model(model_start, only_with_grad=False)
@@ -366,7 +368,8 @@ class ClsFedHandler(object):
         self.local_scheduler = None
         if CFG.enable_scheduler:
             self.local_scheduler = optim.lr_scheduler.MultiStepLR(self.local_optim,
-                                    milestones=[int(CFG.epochs*0.5), int(CFG.epochs*0.75)],
+                                    milestones=[int(CFG.global_rounds*0.5),
+                                                int(CFG.global_rounds*0.75)],
                                     gamma=0.1)
         self.agghatch = agghatch
 
@@ -379,7 +382,7 @@ class ClsFedHandler(object):
 def simple_main(model_key=None, folder_suffix=""):
 
     ### SETUP
-    rutl.START_SEED()
+    rutl.START_SEED(CFG.seed)
     gpuid_generator = fedutl.gpu_devices_generator()
 
     # -- log path --
@@ -559,17 +562,28 @@ def simple_main(model_key=None, folder_suffix=""):
                 )
             lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-global-bests.txt', console=False)
 
+        ## Test Last N epochs for non fluctuating results
+        if (CFG.test_last_E_epochs is not None ) and (CFG.update_mode == "epoch"):
+            if (itr+1) > (CFG.global_rounds - CFG.test_last_E_epochs):
+                test_model_list = list(state.keys())[1:]
+                print(test_model_list)
+                simple_test(CFG.gLogPath, test_model_list,
+                            folder_suffix=f"test-epoch-{itr}", test_best=False)
+
+
     return CFG.gLogPath
 
 
 
 def simple_test(saved_logpath, model_list=["global_model"],
-                epochs_ran=None, folder_suffix=""):
+                epochs_ran=None, folder_suffix="",
+                test_best=True):
 
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
 
-    dir_to_save = saved_logpath+folder_suffix
+    dir_to_save = f"{saved_logpath}/{folder_suffix}/"
+    os.makedirs(dir_to_save, exist_ok=True)
 
     ### MODEL
     model = ClassifierNet(arch=CFG.featx_arch,
@@ -582,13 +596,13 @@ def simple_test(saved_logpath, model_list=["global_model"],
     model = model.to(gpu_device)
 
     for m in model_list:
-        pth_list = {
-            "best": torch.load(saved_logpath+f"/weights/best_{m}.pth"),
-            "last": torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"],
-        }
+        pth_list = {}
+        pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"]
+        if test_best: pth_list["best"] = torch.load(saved_logpath+f"/weights/best_{m}.pth")
 
         ### MODEL TESTING
-        for p_k, pth_wgt in pth_list.items():
+        for p_k in pth_list.keys():
+            pth_wgt = pth_list[p_k]
             ret_msg = model.load_state_dict(pth_wgt, strict=False)
             lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
                         dir_to_save +'/misc.txt')
