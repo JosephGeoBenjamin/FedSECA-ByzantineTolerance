@@ -453,7 +453,6 @@ def torch_insert_diagonal(x, D = 0.0): #expand along dim=1
 
 ##------------------------------------------------------------------------------
 
-## NOTE:ISIC 170sec for full epoch
 class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
     def __init__(self, cfg, id, model, device="cpu"):
@@ -482,6 +481,11 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             if id in byz_clients:
                 self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
                 print("Byz Method", self.byztn_cfg["byztn_method"])
+
+    def _datavolume_based(self, data_dist):
+        ## FOR ISIC dataset
+        K = data_dist.shape[0]
+        return torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]*K).view(K,K)
 
 
     def _distance_softmin_weightage(self, data_dist):
@@ -521,54 +525,17 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         return weightage_matrix
 
-    def _boltzmanscandal_weightage(self, data_dist):
-        """ data_dist: numpy arr
-        return : torch.tensor
-        """
-        # Not used
-        # data_dist = (data_dist + data_dist.T) /2  # symmetrize
-
-        data_dist = torch.tensor(data_dist)
-
-        ## Compute Gamma
-        non_diag = torch_remove_diagonal(data_dist)
-        dist_mu = torch.mean(non_diag)
-        sigma = torch.std(non_diag)
-
-        ## 90th - 1.282 | 95th - 1.645 | 99th - 2.326 | 75th - 0.674
-        sigz = 1.645
-        dist_max, dist_min = dist_mu+sigz*sigma, dist_mu-sigz*sigma
-        gamma =  -np.log(6-1) / (dist_min-dist_mu)
-
-
-        ## Compute alpha_ii
-        drowmean = (data_dist.sum(dim=0)/(data_dist.shape[0]-1))
-        smoidin = -gamma *(drowmean - dist_mu)
-        alpha_ii = 1 / (1 + torch.exp(smoidin))
-
-
-        ## compute beta_ij
-        softin = - gamma*(non_diag - dist_mu) /(6-1)
-        beta_ij = torch.softmax(softin, dim=1)
-        beta_ij = torch_insert_diagonal(beta_ij)
-
-        # omega_ij full
-        weightage_matrix = ( (1-alpha_ii) * beta_ij
-                + alpha_ii * torch.eye(data_dist.shape[0], dtype=float).to_dense())
-
-        return weightage_matrix
-
 
     def _boltzman_factor_weightage(self, data_dist):
         """ Follows Boltzman Distribution paradigm
         data_dist: numpy arr
         return : torch.tensor
         """
-        # data_dist = (data_dist + data_dist.T) / 2
+        data_dist = (data_dist + data_dist.T) / 2
         # data_dist = data_dist.T
+        K = data_dist.shape[0]
 
         data_dist = torch.tensor(data_dist)
-
 
         ## 90th - 1.282 | 95th - 1.645 | 99th - 2.326 | 75th - 0.674
         sigz = 1.645
@@ -577,23 +544,30 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         dist_mu = torch.mean(non_diag)
         sigma = torch.std(non_diag)
 
-        dist_max, dist_minB = dist_mu+sigz*sigma, dist_mu-sigz*sigma
-
         dist_max, dist_min = dist_mu+sigz*sigma, dist_mu-sigz*sigma
         tempK = (dist_max - dist_min) / (np.log(1/6) - np.log(5/6))
-
 
         ## compute beta_ij
         softin_beta = non_diag / tempK
         beta_ij = torch.softmax(softin_beta, dim=1)
+
+        ## randomize compute betas along row
+        # perm = torch.randperm(beta_ij.shape[1])
+        # beta_ij = beta_ij[:, perm]
+
+        ## constant betas
+        # beta_ij = beta_ij*0 + (1/5)
+
         beta_ij = torch_insert_diagonal(beta_ij)
 
-
         ## Compute alpha_ii
-        drowmean = (data_dist.sum(dim=0)/(data_dist.shape[0]-1))
-        softin_alpha = drowmean / tempK
-        alpha_ii = torch.softmax(softin_alpha, dim=0)
+        # drowmean = (data_dist.sum(dim=0)/(data_dist.shape[0]-1))
+        # softin_alpha = drowmean / tempK
+        # alpha_ii = torch.softmax(softin_alpha, dim=0)
+        # alpha_ii = torch.max(beta_ij, dim=1)[0]
 
+        ## constant alpha
+        alpha_ii = 0.9/ data_dist.shape[0] #approx 0.25 for isic
 
         # omega_ij full
         weightage_matrix = ((1-alpha_ii) * beta_ij +
