@@ -415,11 +415,86 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
 
 ##------------------------------------------------------------------------------
+##==============================================================================
 
+
+class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.num_client_k = int(cfg.data_centers_count) # K
+        self.model_0th = copy.deepcopy(model)
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+
+        self.aggregator_func = self.__dataweightage_aggregation
+
+        with h5py.File(self.defense_cfg["datasummary"], 'r') as hdf5_file:
+            data_dist = hdf5_file["dist_matrix"][()]
+            data_dist = data_dist[:-1, :-1] # ignore all distances
+
+        self.client_weightage = self._softmined_weightage(data_dist)
+
+        print("Defense: WeighAlpha-SKHD")
+
+        if len(self.byztn_cfg) != 0:
+            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+            if id in byz_clients:
+                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                print("Byz Method", self.byztn_cfg["byztn_method"])
+
+    ##--------------------
+
+    def _datavolume_based(self, data_dist):
+        ## FOR ISIC dataset
+        K = data_dist.shape[0]
+        return torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]).view(K,1)
+
+
+    def _softmined_weightage(self, data_dist):
+        """ Follows Boltzman Distribution paradigm
+        data_dist: numpy arr
+        return : torch.tensor
+        """
+        data_dist = (data_dist + data_dist.T) / 2
+        # data_dist = data_dist.T
+        K = data_dist.shape[0]
+
+        data_dist = torch.tensor(data_dist)
+
+        # mean_dist = data_dist.mean(dim=1)
+        rmean_dist = data_dist.mean(dim=1)
+
+        soft_dist = (rmean_dist -rmean_dist.min()) / rmean_dist.max()
+        weightage_array =  torch_F.softmin(soft_dist)
+
+        return weightage_array.view(K,1)
+
+    #-------- Server methods ----------
+
+    def __dataweightage_aggregation(self, lsets):
+        wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        state_dict_struct = copy.deepcopy(lsets[0]["model"].state_dict())
+
+        cweigh = self.client_weightage[0].view(-1, 1)
+        cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        cli_wvec = torch.sum(cweighed_wvec, axis = 0)
+        agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
+
+        info_dict = {"client_weightage":self.client_weightage.tolist()}
+
+        return agg_states, info_dict
 
 
 
 ##==============================================================================
+## Decoupled Client bsaed weightage
 
 def remove_diagonal(x): #contract along dim=1
     n, m = x.shape
@@ -481,6 +556,8 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             if id in byz_clients:
                 self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
                 print("Byz Method", self.byztn_cfg["byztn_method"])
+
+    ##--------------------
 
     def _datavolume_based(self, data_dist):
         ## FOR ISIC dataset
