@@ -115,8 +115,7 @@ class NoGuardΞByzantine():
         else:
             out_state = model.state_dict()
 
-        model.load_state_dict(out_state)
-        lset["model"] = model
+        lset["model_state"] = out_state
 
         return lset
 
@@ -134,7 +133,7 @@ class NoGuardΞByzantine():
         model = copy.deepcopy(model_struct)
         if not gset: return model, {}
 
-        model.load_state_dict(copy.deepcopy(gset["model"].state_dict()), strict=True)
+        model.load_state_dict(copy.deepcopy(gset["model_state"]), strict=True)
         model = model.to(device)
         ghatch = {}
 
@@ -146,8 +145,8 @@ class NoGuardΞByzantine():
     def __plain_fedavg(self, lsets):
         local_states = []
         for ls in lsets:
-            local_states.append(ls["model"].state_dict())
-        agg_states = fedops.global_average_statedict(local_states)
+            local_states.append(ls["model_state"])
+        agg_states = fedops.global_average_statedict(local_states, device="cpu")
 
         info_dict = {"client_weightage":[1/len(lsets)]*len(lsets)}
         return agg_states, info_dict
@@ -158,15 +157,10 @@ class NoGuardΞByzantine():
         """ Return: aggregated stat
         """
         if not device: device = next(self.model_0th.parameters()).device
-        for ls in lsets: ls["model"].to(device) #for nn.module .cuda is both inplace and assignable
-
-        agg_model = fedops.model_copier(lsets[0]["model"])
 
         agg_states, select_info = self.aggregator_func(lsets)
 
-        agg_model.load_state_dict(agg_states)
-
-        gset = {"model": agg_model, "client_select": select_info}
+        gset = {"model_state": agg_states, "client_select": select_info}
         return gset
 
 
@@ -215,8 +209,7 @@ class NoGuardΞByzantineDecopl():
         else:
             out_state = model.state_dict()
 
-        model.load_state_dict(out_state)
-        lset["model"] = model
+        lset["model_state"] = out_state
 
         return lset
 
@@ -250,7 +243,8 @@ class NoGuardΞByzantineDecopl():
     def __plain_fedavg(self, lsets):
         local_states = []
         for ls in lsets:
-            local_states.append(ls["model"].state_dict())
+            local_states.append(ls["model_state"])
+
         agg_states = fedops.global_average_statedict(local_states)
 
         agg_states_cli = { f"client_{i}": copy.deepcopy(agg_states)
@@ -266,7 +260,6 @@ class NoGuardΞByzantineDecopl():
         """ Return: aggregated stat
         """
         if not device: device = next(self.model_0th.parameters()).device
-        for ls in lsets: ls["model"].to(device) #for nn.module .cuda is both inplace and assignable
 
         agg_states_cli, select_info = self.aggregator_func(lsets)
 
@@ -338,13 +331,13 @@ class KrumΞByzantine(NoGuardΞByzantine):
             final_wvec +=wvecs[mi]
         final_wvec /= len(midxs)
 
-        agg_states = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
+        agg_state = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
 
 
         info_dict = {"client_weightage": [ 1/len(midxs) if i in midxs else 0
                                         for i in range(len(lsets))]
                     }
-        return agg_states, info_dict
+        return agg_state, info_dict
 
 
 ##------------------------------------------------------------------------------
@@ -408,10 +401,10 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
         final_wvec = torch.sum(cweighed_wvec, axis = 0)
 
-        agg_states = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
+        agg_state = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
 
         info_dict = {"client_weightage":cweigh.flatten().tolist()}
-        return agg_states, info_dict
+        return agg_state, info_dict
 
 
 ##------------------------------------------------------------------------------
