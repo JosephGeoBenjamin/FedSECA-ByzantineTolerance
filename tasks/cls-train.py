@@ -56,8 +56,10 @@ featx_bnorm    = False,
 clsfy_layers   = [9], #First mlp inwill be set w.r.t FeatureExtractor
 clsfy_dropout  = 0.0,
 
-checkpoint_dir= "hypotheses/#dummy-run/trail-001",
-resume_training=False
+test_last_E_epochs = 5,
+
+checkpoint_dir  = "hypotheses/#dummy-run/trail-001",
+resume_training = False
 )
 
 ### -----
@@ -324,14 +326,24 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
         trainMetric.reset()
         validMetric.reset()
 
+        if (CFG.test_last_E_epochs is not None ):
+            if (epoch+1) > (CFG.epochs - CFG.test_last_E_epochs):
+                simple_test(CFG.gLogPath, epochs_ran=epoch,
+                            folder_suffix=f"test-epoch-{epoch}", test_best=False)
+
     return CFG.gLogPath
 
 
 
-def simple_test(saved_logpath):
+def simple_test(saved_logpath,
+                epochs_ran=None, folder_suffix="",
+                test_best=True):
 
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
+
+    dir_to_save = f"{saved_logpath}/{folder_suffix}/"
+    os.makedirs(dir_to_save, exist_ok=True)
 
     ### MODEL
     model = ClassifierNet(arch=CFG.featx_arch,
@@ -343,21 +355,21 @@ def simple_test(saved_logpath):
                     )
     model = model.to(gpu_device)
 
-    pth_list = {
-        "best": torch.load(saved_logpath+f"/weights/bestmodel.pth"),
-        "last": torch.load(saved_logpath+"/weights/checkpoint.pth")[f"model"],
-        }
+    pth_list = {}
+    pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"model"]
+    if test_best: pth_list["best"] = torch.load(saved_logpath+f"/weights/bestmodel.pth")
+
 
     ### MODEL TESTING
     for p_k, pth_wgt in pth_list.items():
         ret_msg = model.load_state_dict(pth_wgt, strict=False)
         lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
-                        CFG.gLogPath +'/misc.txt')
+                        dir_to_save +'/misc.txt')
 
         test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
         for c in ["all"]+ list(range(test_center_num)):
             testloader = getDataLoaders(CFG, center_index=c, type="test")
-            testMetric = MultiClassMetrics(saved_logpath+f"/metrics/{p_k}-test")
+            testMetric = MultiClassMetrics(dir_to_save+f"/metrics/{p_k}-test")
             model.eval()
 
             start_time = time.time()
@@ -373,15 +385,17 @@ def simple_test(saved_logpath):
                 detail_stat = dict(
                         model_type  = p_k,
                         test_center = c,
+                        epochs_ran  = epochs_ran,
                         timetaken   = int(time.time() - start_time),
                         testf1scr   = testMetric.get_f1score(),
                         testbalacc  = testMetric.get_balanced_accuracy(),
                         testacc     = testMetric.get_accuracy(),
+                        model_used  = os.path.basename(saved_logpath),
                         testreport  = testMetric.get_class_report(),
                         testconfus  = testMetric.get_confusion_matrix(
                                         save_png= True, title=log_title).tolist(),
                     )
-                lutl.LOG2DICTXT(detail_stat, saved_logpath+'/test-results.txt',
+                lutl.LOG2DICTXT(detail_stat, dir_to_save+'/test-results.txt',
                                 console=True)
 
                 testMetric._write_predictions(title=log_title)

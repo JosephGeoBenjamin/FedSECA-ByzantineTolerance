@@ -494,8 +494,8 @@ def simple_main(model_key=None, folder_suffix=""):
                 difl2 = []
                 difcos = []
                 for info2 in local_info_for_ansys:
-                    dv1 = info1["model_diff_vec"]
-                    dv2 = info2["model_diff_vec"]
+                    dv1 = info1["model_diff_vec"].to(g_device)
+                    dv2 = info2["model_diff_vec"].to(g_device)
                     difl2.append(torch.norm(dv1-dv2).item())
                     difcos.append(nn.functional.cosine_similarity(dv1.view(1,-1), dv2.view(1,-1)).item()  )
 
@@ -571,7 +571,8 @@ def simple_main(model_key=None, folder_suffix=""):
             if (itr+1) > (CFG.global_rounds - CFG.test_last_E_epochs):
                 test_model_list = list(state.keys())[1:]
                 print(test_model_list)
-                simple_test(CFG.gLogPath, test_model_list,
+                simple_test(CFG.gLogPath, epochs_ran=itr,
+                            model_list=test_model_list,
                             folder_suffix=f"test-epoch-{itr}", test_best=False)
 
 
@@ -579,8 +580,8 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
 
-def simple_test(saved_logpath, model_list=["global_model"],
-                epochs_ran=None, folder_suffix="",
+def simple_test(saved_logpath, epochs_ran=None,
+                model_list=["global_model"], folder_suffix="",
                 test_best=True):
 
     gpu_device = torch.device("cuda")
