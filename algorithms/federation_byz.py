@@ -146,10 +146,10 @@ class NoGuardΞByzantine():
         local_states = []
         for ls in lsets:
             local_states.append(ls["model_state"])
-        agg_states = fedops.global_average_statedict(local_states, device="cpu")
+        agg_state = fedops.global_average_statedict(local_states, device="cpu")
 
         info_dict = {"client_weightage":[1/len(lsets)]*len(lsets)}
-        return agg_states, info_dict
+        return agg_state, info_dict
 
 
     # @instancemethod  #Global calculation to send to locals
@@ -158,9 +158,9 @@ class NoGuardΞByzantine():
         """
         if not device: device = next(self.model_0th.parameters()).device
 
-        agg_states, select_info = self.aggregator_func(lsets)
+        agg_state, select_info = self.aggregator_func(lsets)
 
-        gset = {"model_state": agg_states, "client_select": select_info}
+        gset = {"model_state": agg_state, "client_select": select_info}
         return gset
 
 
@@ -271,7 +271,7 @@ class NoGuardΞByzantineDecopl():
 
 ##==============================================================================
 
-
+## TODO: fix model state reading directly
 
 class KrumΞByzantine(NoGuardΞByzantine):
     """
@@ -429,7 +429,7 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_weightage = self._softmined_weightage(data_dist)
+        self.client_weightage = self._datavolume_based(data_dist)
 
         print("Defense: WeighAlpha-SKHD")
 
@@ -469,20 +469,20 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __dataweightage_aggregation(self, lsets):
-        wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+        wvecs = [fedops.get_param_from_state(l["model_state"])
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
-        state_dict_struct = copy.deepcopy(lsets[0]["model"].state_dict())
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
 
-        cweigh = self.client_weightage[0].view(-1, 1)
+        cweigh = self.client_weightage.view(-1, 1)
         cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
         cli_wvec = torch.sum(cweighed_wvec, axis = 0)
-        agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
+        agg_state = fedops.set_param_in_state(state_dict_struct, cli_wvec)
 
         info_dict = {"client_weightage":self.client_weightage.tolist()}
 
-        return agg_states, info_dict
+        return agg_state, info_dict
 
 
 
@@ -539,7 +539,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_weightage = self._boltzman_factor_weightage(data_dist)
+        self.client_weightage = self._datavolume_based(data_dist)
 
         print("Defense: Decoupled WeighOmega-SKHD")
 
@@ -621,15 +621,15 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     #-------- Server methods ----------
 
     def __dataweightage_aggregation_decopld(self, lsets):
-        wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+        wvecs = [fedops.get_param_from_state(l["model_state"])
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         out_ref_wvec = torch.zeros_like(stacked_wvec)
 
         agg_states_cli = {}
-        state_dict_struct = copy.deepcopy(lsets[0]["model"].state_dict())
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         for i in range(len(lsets)):
-            cweigh = self.client_weightage[i].view(-1, 1)
+            cweigh = self.client_weightage[i,:].view(-1, 1)
             cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
             cli_wvec = torch.sum(cweighed_wvec, axis = 0)
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
