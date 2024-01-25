@@ -333,13 +333,17 @@ class ClsFedHandler(object):
 
 
         if ANALYSE_MODELS:
-            diff_dict = fedutl.find_layerwise_weight_difference(model, model_start)
-            diff_dict.update({"client": self.id, "epoch":epoch})
+            model_diff_vec = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"]) \
+                    - fedops.get_param_from_state(model_start.state_dict(), keys_to_ignore=["num_batches_tracked"])
+
+            diff_dict = {"client": self.id, "epoch":epoch,
+                              "delta_l2norm": torch.norm(model_diff_vec).item() }
+            diff_dict["Layerwise"] =  fedutl.find_layerwise_weight_difference(model, model_start)
             lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/trainAnsys-Wdiff_g-epochwise.txt', console=False)
 
-            model_diff_vec = fedops.get_param_from_model(model, only_with_grad=False) \
-                                - fedops.get_param_from_model(model_start, only_with_grad=False)
             return_result["model_diff_vec"] = model_diff_vec
+            return_result["model_vec"] = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"])
+
         ## end >>>>> analyse_models
 
         self.trainMetric.reset()
@@ -488,20 +492,25 @@ def simple_main(model_key=None, folder_suffix=""):
                                                 global_aggset, device=g_device,)
 
         if ANALYSE_MODELS:
+            l2_norm_dist = []
             diff_l2_norm = []
             diff_cos_sim = []
             for info1 in local_info_for_ansys:
+                l2nrm = []
                 difl2 = []
                 difcos = []
                 for info2 in local_info_for_ansys:
                     dv1 = info1["model_diff_vec"].to(g_device)
                     dv2 = info2["model_diff_vec"].to(g_device)
+                    v1 = info1["model_vec"].to(g_device)
+                    v2 = info2["model_vec"].to(g_device)
+                    l2nrm.append(torch.norm(v1-v2).item())
                     difl2.append(torch.norm(dv1-dv2).item())
                     difcos.append(nn.functional.cosine_similarity(dv1.view(1,-1), dv2.view(1,-1)).item()  )
-
+                l2_norm_dist.append(l2nrm)
                 diff_l2_norm.append(difl2)
                 diff_cos_sim.append(difcos)
-            dists_dict = {"epoch": itr,
+            dists_dict = {"epoch": itr, "l2norm":l2_norm_dist,
                         "diff_l2norm":diff_l2_norm, "diff_cosine": diff_cos_sim}
             lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 

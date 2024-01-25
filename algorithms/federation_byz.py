@@ -162,7 +162,7 @@ class NoGuardΞByzantineDecopl():
         self.defense_cfg = cfg.defense_cfg
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
-        print("DEFENSE: None")
+        print("DEFENSE: None decouple")
 
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]

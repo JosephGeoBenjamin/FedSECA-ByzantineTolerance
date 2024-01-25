@@ -76,10 +76,13 @@ def get_param_from_model(model:torch.nn.Module, only_with_grad=False):
     return torch.cat(param_vec)
 
 
-def get_param_from_state(state_dict:dict):
+def get_param_from_state(state_dict:dict, keys_to_ignore:list=[]):
+    """ keys_to_ignore:  can be list subset string or full key name
+    """
     param_vec = []
     for key, value in state_dict.items():
-        param_vec.append(value.view(-1).float())
+        if ( sum([i in key for i in keys_to_ignore]) == 0 ):
+            param_vec.append(value.view(-1).float())
     return torch.cat(param_vec)
 
 
@@ -97,8 +100,9 @@ def set_param_in_model(model, param_vec, only_with_grad=False):
     return model
 
 
-def set_param_in_state(state_dict, param_vec, only_with_grad=False):
+def set_param_in_state(state_dict, param_vec):
     """ No inplace; only rely on return
+    keys_to_ignore:  can be list subset string or full key name
     """
     start = 0
     for key, value in state_dict.items():
