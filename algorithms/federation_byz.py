@@ -9,68 +9,44 @@ import numpy as np
 import scipy
 import pyod
 import algorithms.federation_ops as fedops
-
+import algorithms.byzantine_attacks as byz_attacks
 
 ##==============================================================================
 ## COMMONS
 
+def get_attack_func(method_string):
+    attack_func = getattr(byz_attacks, method_string)
+    return attack_func
 
+def remove_diagonal(x): #contract along dim=1
+    n, m = x.shape
+    assert n == m
+    x = x.flatten()[:-1].reshape(n - 1, n + 1)[:, 1:].flatten()
+    x= x.reshape(n, n-1)
+    return x
 
-##==============================================================================
-## ATTACKS
+def insert_diagonal(x, D = 0.0): #expand along dim=1
+    n, m = x.shape
+    x = x.flatten().reshape(n - 1, n)
+    x = np.hstack([ D*np.ones((n-1, 1)), x])
+    x = np.hstack([x.flatten(), np.array([D])])
+    x= x.reshape(n, n)
+    return x
 
+def torch_remove_diagonal(x): #contract along dim=1
+    n, m = x.shape
+    assert n == m
+    x = x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+    x = x.reshape(n, n-1)
+    return x
 
-class RandomizedζAttack():
-    def __init__(self, cfg, model ):
-        # self.model_0th = copy.deepcopy(model)
-        self.byz_cfg = cfg.byztn_cfg
-
-    def modify(self, model_state):
-        weight_vec = fedops.get_param_from_state(model_state)
-        weight_vec[:] = torch.rand(len(weight_vec))
-        out_state = fedops.set_param_in_state(model_state, weight_vec)
-
-        return out_state
-
-
-class AffineζAttack():
-    def __init__(self, cfg, model ):
-        # self.model_0th = copy.deepcopy(model)
-        self.byz_cfg = cfg.byztn_cfg
-
-        self.scaler = cfg.byztn_cfg["scale"]
-
-    def modify(self, model_state):
-        weight_vec = fedops.get_param_from_state(model_state)
-        weight_vec[:]= self.scaler * weight_vec
-        out_state = fedops.set_param_in_state(model_state, weight_vec)
-
-        return out_state
-
-
-class NaifttCraftedζAttack():
-    """ https://github.com/Naiftt/SPAFD/ """
-
-    def __init__(self, cfg, model ):
-        self.byz_cfg = cfg.byztn_cfg
-        self.lmbd = cfg.byztn_cfg["lambda"]
-
-        self.wvec_tminus_1 = fedops.get_param_from_state(model.state_dict())
-
-
-    def modify(self, model_state):
-        wvec_current = fedops.get_param_from_state(model_state)
-
-        S = (wvec_current > self.wvec_tminus_1).long()
-        S[S==0] = -1
-        new_wvec =  wvec_current - (self.lmbd*S)
-
-        out_state = fedops.set_param_in_state(model_state, new_wvec)
-        self.wvec_tminus_1 = wvec_current.clone()
-
-        return out_state
-
-
+def torch_insert_diagonal(x, D = 0.0): #expand along dim=1
+    n, m = x.shape
+    x = x.flatten().view(n - 1, n)
+    x = torch.hstack([ D*torch.ones((n-1, 1)), x])
+    x = torch.hstack([x.flatten(), torch.tensor([D])])
+    x = x.reshape(n, n)
+    return x
 
 ##==============================================================================
 ## Fed Protocol -- all are State Dict based aggregation
@@ -97,7 +73,7 @@ class NoGuardΞByzantine():
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
             if id in byz_clients:
-                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
                 print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
@@ -191,7 +167,7 @@ class NoGuardΞByzantineDecopl():
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
             if id in byz_clients:
-                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
                 print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
@@ -300,7 +276,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
             if id in byz_clients:
-                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
                 print("Byz Method", self.byztn_cfg["byztn_method"])
 
 
@@ -368,7 +344,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
             if id in byz_clients:
-                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
                 print("Byz Method", self.byztn_cfg["byztn_method"])
 
 
@@ -429,14 +405,14 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_weightage = self._datavolume_based(data_dist)
+        self.client_weightage = self._softmined_weightage(data_dist)
 
         print("Defense: WeighAlpha-SKHD")
 
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
             if id in byz_clients:
-                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
                 print("Byz Method", self.byztn_cfg["byztn_method"])
 
     ##--------------------
@@ -489,36 +465,6 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
 ##==============================================================================
 ## Decoupled Client bsaed weightage
 
-def remove_diagonal(x): #contract along dim=1
-    n, m = x.shape
-    assert n == m
-    x = x.flatten()[:-1].reshape(n - 1, n + 1)[:, 1:].flatten()
-    x= x.reshape(n, n-1)
-    return x
-
-def insert_diagonal(x, D = 0.0): #expand along dim=1
-    n, m = x.shape
-    x = x.flatten().reshape(n - 1, n)
-    x = np.hstack([ D*np.ones((n-1, 1)), x])
-    x = np.hstack([x.flatten(), np.array([D])])
-    x= x.reshape(n, n)
-    return x
-
-def torch_remove_diagonal(x): #contract along dim=1
-    n, m = x.shape
-    assert n == m
-    x = x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
-    x = x.reshape(n, n-1)
-    return x
-
-def torch_insert_diagonal(x, D = 0.0): #expand along dim=1
-    n, m = x.shape
-    x = x.flatten().view(n - 1, n)
-    x = torch.hstack([ D*torch.ones((n-1, 1)), x])
-    x = torch.hstack([x.flatten(), torch.tensor([D])])
-    x = x.reshape(n, n)
-    return x
-
 ##------------------------------------------------------------------------------
 
 class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
@@ -539,7 +485,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_weightage = self._datavolume_based(data_dist)
+        self.client_weightage = self._mena_soft_weightage(data_dist)
 
         print("Defense: Decoupled WeighOmega-SKHD")
 
@@ -547,7 +493,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
             if id in byz_clients:
-                self.byz_way = globals()[self.byztn_cfg["byztn_method"]](cfg, model)
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
                 print("Byz Method", self.byztn_cfg["byztn_method"])
 
     ##--------------------
@@ -558,13 +504,33 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         return torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]*K).view(K,K)
 
 
-    def _distance_softmin_weightage(self, data_dist):
+    def _distance_naive_softmin_weightage(self, data_dist):
+        data_dist = (data_dist + data_dist.T) / 2
+
         data_dist = torch.tensor(data_dist)
 
         normed_dist = (data_dist - data_dist.min(dim=1, keepdim=True)[0]) /  \
                     (data_dist.max(dim=1, keepdim=True)[0] - data_dist.min(dim=1, keepdim=True)[0])
 
         weightage_matrix = torch_F.softmin(torch.tensor(normed_dist), dim=1)
+        return weightage_matrix
+
+    def _mena_soft_weightage(self, data_dist):
+        data_dist = (data_dist + data_dist.T) / 2
+        data_dist = torch.tensor(data_dist)
+
+        K = data_dist.shape[0] #clients
+
+        rmean_dist = torch.mean(data_dist, dim=0)
+
+        all_dist =  (data_dist +
+            rmean_dist * torch.eye(K, dtype=float).to_dense())
+
+        rel_dist = all_dist / rmean_dist.view(-1,1)
+        rel_dist = torch.clamp(rel_dist, min=1.0)
+
+        weightage_matrix = torch_F.softmin(rel_dist)
+
         return weightage_matrix
 
 
