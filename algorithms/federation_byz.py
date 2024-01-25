@@ -386,7 +386,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 ##------------------------------------------------------------------------------
 ##==============================================================================
 
-
+### Single weightage base on Sinkhorn Distance
 class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
 
     def __init__(self, cfg, id, model, device="cpu"):
@@ -462,10 +462,9 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
 
 
 
-##==============================================================================
-## Decoupled Client bsaed weightage
-
 ##------------------------------------------------------------------------------
+
+## Decoupled weightage based on Sinkhorn distance
 
 class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
@@ -606,4 +605,125 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
 
         info_dict = {"client_weightage":self.client_weightage.tolist()}
+        return agg_states_cli, info_dict
+
+
+##==============================================================================
+
+
+class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.num_client_k = int(cfg.data_centers_count) # K
+        self.model_0th = copy.deepcopy(model)
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+
+        self.aggregator_func = self.__dynamic_Tau_from_Lambda_aggr_decopld
+
+        with h5py.File(self.defense_cfg["datasummary"], 'r') as hdf5_file:
+            data_dist = hdf5_file["dist_matrix"][()]
+            data_dist = data_dist[:-1, :-1] # ignore all distances
+
+        self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
+
+        ##
+        if self.id == "G": #large tensors, so why waste mem
+            self.aggwvec_tminus1 = self.init_stacked_wvecs()
+            self.wvec_tminus1    = self.aggwvec_tminus1.clone()
+
+        print("Defense: Decoupled Clipping Tau-SKHD")
+
+
+        if len(self.byztn_cfg) != 0:
+            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+            if id in byz_clients:
+                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
+                print("Byz Method", self.byztn_cfg["byztn_method"])
+
+    ##--------------------
+
+    def init_stacked_wvecs(self):
+        wvec = fedops.get_param_from_state(self.model_0th.state_dict())
+        return torch.vstack( [wvec]*self.num_client_k )
+
+
+
+    def _get_constant_tau(self, data_dist):
+        ## TODO: fix
+        tau_val = 10
+        K = data_dist.shape[0]
+        return None
+
+
+    def _get_lmbda_from_dist(self, data_dist):
+        data_dist = (data_dist + data_dist.T) / 2
+        data_dist = torch.tensor(data_dist)
+        K = data_dist.shape[0] #clients
+
+        rmean_dist = torch.sum(data_dist, dim=0) / K
+
+        all_dist = data_dist + (rmean_dist * torch.eye(K, dtype=float).to_dense())
+
+        lambda_dist = torch.div(all_dist, rmean_dist.view(K, 1))
+        lambda_dist = 1 + torch.abs(1 - lambda_dist)
+
+        return lambda_dist
+
+
+    #-------- Server methods ----------
+    def safe_divide(self, nu, de, fill=1.0):
+        res = torch.full_like(nu, fill_value=fill)
+        mask = (de != 0.0)
+        res[mask] = torch.div(nu[mask], de[mask])
+        return res
+
+
+    def __dynamic_Tau_from_Lambda_aggr_decopld(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        wvecs = [fedops.get_param_from_state(l["model_state"])
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        outref_aggwvec = torch.zeros_like(stacked_wvec)
+        agg_states_cli = {}
+        lmbda_dist =self.client_clip_factor
+
+        stacked_wvec_tminus1    = self.wvec_tminus1
+        stacked_aggwvec_tminus1 = self.aggwvec_tminus1
+
+        print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
+
+        ## trying out both deltas
+        # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_aggwvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)
+        tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)
+
+        radii_scales = []
+        for i in range(stacked_wvec.shape[0]):
+            taui = tau_rad[i].view(-1, 1)
+            ccden = torch.norm(stacked_wvec - stacked_wvec[i], dim=1).view(-1,1)
+
+            taui_by_ccden = self.safe_divide(taui, ccden)
+            scale_rad = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
+
+            clipped_deltawvec = scale_rad * (stacked_wvec - stacked_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_aggdeltawvec = torch.mean(clipped_deltawvec, axis = 0)
+
+            cli_wvec = stacked_aggwvec_tminus1[i] + clipped_aggdeltawvec
+            outref_aggwvec[i, :] = cli_wvec
+
+            radii_scales.append(scale_rad.flatten().tolist())
+            agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
+            agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
+
+        agg_states = fedops.set_param_in_state(state_dict_struct, outref_aggwvec.mean(dim=0))
+        agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
+
+        self.wvec_tminus1    = stacked_wvec.clone()
+        self.aggwvec_tminus1 = outref_aggwvec.clone()
+
+        info_dict = {"client_clip_weightage":radii_scales}
         return agg_states_cli, info_dict
