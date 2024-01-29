@@ -268,6 +268,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
         self.krum_m  = int(self.defense_cfg["multikrum_m"]) # M
         self.num_byz_b  = self.defense_cfg["num_assumed_byz"] # B; should hold 2b+2 < n
 
+        self.vec_state_ignore = ["num_batches_tracked"]
         if not ( (2*self.num_byz_b+2) < self.num_client_k):
             print(f"WARNING!!!..... `2b+2 < n` doesn't hold, 2*{self.num_byz_b}+2 < {self.num_client_k} ")
         print("Defense: Krum")
@@ -284,7 +285,12 @@ class KrumΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __krum_aggregation(self, lsets):
-        wvecs = [fedops.get_param_from_state(l["model"].state_dict()) for l in lsets]
+        fully_wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+                    for l in lsets]
+
+        wvecs = [fedops.get_param_from_state(l["model"].state_dict(),
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
         num_neigbour = self.num_client_k - self.num_byz_b - 2
@@ -304,7 +310,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
 
         final_wvec = torch.zeros_like(wvecs[0])
         for mi in midxs.tolist():
-            final_wvec +=wvecs[mi]
+            final_wvec +=fully_wvecs[mi]
         final_wvec /= len(midxs)
 
         agg_state = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
@@ -338,8 +344,10 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         self.aggregator_func = self.__dos_aggregation
         self.cpd_l2 = COPOD()
         self.cpd_cs = COPOD()
-        print("Defense: Copod-DOS")
 
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        print("Defense: Copod-DOS")
 
         if len(self.byztn_cfg) != 0:
             byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
@@ -352,7 +360,12 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __dos_aggregation(self, lsets):
-        wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+        fully_wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+                    for l in lsets]
+        sfully_wvec = torch.vstack(fully_wvecs)
+
+        wvecs = [fedops.get_param_from_state(l["model"].state_dict(),
+                    keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
@@ -373,7 +386,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         abnorm_score = torch.tensor(abnorm_score).view(-1, 1)
 
         cweigh = torch_F.softmax(-1*abnorm_score,dim=0)
-        cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        cweighed_wvec = cweigh.to(self.device) * sfully_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
 
         final_wvec = torch.sum(cweighed_wvec, axis = 0)
 
@@ -405,7 +418,7 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_weightage = self._softmined_weightage(data_dist)
+        self.client_weightage = self._preset_weightage(data_dist)
 
         print("Defense: WeighAlpha-SKHD")
 
@@ -417,10 +430,15 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
 
     ##--------------------
 
-    def _datavolume_based(self, data_dist):
-        ## FOR ISIC dataset
+    def _preset_weightage(self, data_dist):
         K = data_dist.shape[0]
-        return torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]).view(K,1)
+
+        ## FOR ISIC dataset
+        arr = torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]).view(K,1)
+
+        # arr = torch.tensor([1/K]*K).view(K,1)
+
+        return arr
 
 
     def _softmined_weightage(self, data_dist):
@@ -632,7 +650,7 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
 
         ##
-        self.state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
         if self.id == "G": #large tensors, so why waste mem
             self.init_stacked_wvecs()
 
@@ -648,7 +666,9 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     ##--------------------
 
     def init_stacked_wvecs(self):
-        wvec = fedops.get_param_from_state(self.model_0th.state_dict(), keys_to_ignore=self.state_ignore)
+        wvec = fedops.get_param_from_state(self.model_0th.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore)
+        self.wvec_0th = wvec
         self.aggwvec_tminus1 = torch.vstack( [wvec]*self.num_client_k )
         self.wvec_tminus1    = self.aggwvec_tminus1.clone()
         fully_wvec =  fedops.get_param_from_state(self.model_0th.state_dict())
@@ -696,7 +716,8 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         sfully_aggwvec_tminus1 = self.fully_aggwvec_tminus1
 
         #for l2norms
-        wvecs =[fedops.get_param_from_state(l["model_state"], keys_to_ignore=self.state_ignore)
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         outref_aggwvec = torch.zeros_like(stacked_wvec)
@@ -713,7 +734,8 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         ## trying differnt tau computes
         # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_aggwvec_tminus1 - stacked_wvec, dim=1).view(-1, 1) #---> [1]
         # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)    #---> [2]
-        tau_rad = lmbda_dist.to(self.device) * torch.sqrt(torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).mean(dim=0)) #--->[3]
+        # tau_rad = lmbda_dist.to(self.device) * torch.sqrt(torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).mean(dim=0)) #--->[3]
+        tau_rad = lmbda_dist.to(self.device) * torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [4]
 
 
         radii_scales = []
@@ -736,7 +758,8 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
             ## end core
 
-            outref_aggwvec[i, :] = fedops.get_param_from_state(agg_states, keys_to_ignore=self.state_ignore)
+            outref_aggwvec[i, :] = fedops.get_param_from_state(agg_states,
+                                        keys_to_ignore=self.vec_state_ignore)
 
 
         agg_states = fedops.set_param_in_state(state_dict_struct, outfully_aggwvec.mean(dim=0))
