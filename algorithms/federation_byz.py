@@ -285,10 +285,10 @@ class KrumΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __krum_aggregation(self, lsets):
-        fully_wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
                     for l in lsets]
 
-        wvecs = [fedops.get_param_from_state(l["model"].state_dict(),
+        wvecs = [fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
@@ -360,11 +360,11 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __dos_aggregation(self, lsets):
-        fully_wvecs = [fedops.get_param_from_state(l["model"].state_dict())
+        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
                     for l in lsets]
         sfully_wvec = torch.vstack(fully_wvecs)
 
-        wvecs = [fedops.get_param_from_state(l["model"].state_dict(),
+        wvecs = [fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
@@ -390,7 +390,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
         final_wvec = torch.sum(cweighed_wvec, axis = 0)
 
-        agg_state = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
+        agg_state = fedops.set_param_in_state(lsets[0]["model_state"], final_wvec)
 
         info_dict = {"client_weightage":cweigh.flatten().tolist()}
         return agg_state, info_dict
