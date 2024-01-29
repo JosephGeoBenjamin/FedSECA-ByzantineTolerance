@@ -632,9 +632,9 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
 
         ##
+        self.state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
         if self.id == "G": #large tensors, so why waste mem
-            self.aggwvec_tminus1 = self.init_stacked_wvecs()
-            self.wvec_tminus1    = self.aggwvec_tminus1.clone()
+            self.init_stacked_wvecs()
 
         print("Defense: Decoupled Clipping Tau-SKHD")
 
@@ -648,9 +648,11 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     ##--------------------
 
     def init_stacked_wvecs(self):
-        wvec = fedops.get_param_from_state(self.model_0th.state_dict())
-        return torch.vstack( [wvec]*self.num_client_k )
-
+        wvec = fedops.get_param_from_state(self.model_0th.state_dict(), keys_to_ignore=self.state_ignore)
+        self.aggwvec_tminus1 = torch.vstack( [wvec]*self.num_client_k )
+        self.wvec_tminus1    = self.aggwvec_tminus1.clone()
+        fully_wvec =  fedops.get_param_from_state(self.model_0th.state_dict())
+        self.fully_aggwvec_tminus1 = torch.vstack( [fully_wvec]*self.num_client_k )
 
 
     def _get_constant_tau(self, data_dist):
@@ -685,21 +687,34 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
     def __dynamic_Tau_from_Lambda_aggr_decopld(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
-        wvecs = [fedops.get_param_from_state(l["model_state"])
+
+        #for fedavging with bn_batches_tracked; thanks to Pytorch default models for complicating life
+        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+                    for l in lsets]
+        sfully_wvec = torch.vstack(fully_wvecs)
+        outfully_aggwvec = torch.zeros_like(sfully_wvec)
+        sfully_aggwvec_tminus1 = self.fully_aggwvec_tminus1
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"], keys_to_ignore=self.state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         outref_aggwvec = torch.zeros_like(stacked_wvec)
-        agg_states_cli = {}
-        lmbda_dist =self.client_clip_factor
 
         stacked_wvec_tminus1    = self.wvec_tminus1
         stacked_aggwvec_tminus1 = self.aggwvec_tminus1
 
+        ##
+        agg_states_cli = {}
+        lmbda_dist =self.client_clip_factor
+
         print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
-        ## trying out both deltas
-        # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_aggwvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)
-        tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)
+        ## trying differnt tau computes
+        # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_aggwvec_tminus1 - stacked_wvec, dim=1).view(-1, 1) #---> [1]
+        # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)    #---> [2]
+        tau_rad = lmbda_dist.to(self.device) * torch.sqrt(torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).mean(dim=0)) #--->[3]
+
 
         radii_scales = []
         for i in range(stacked_wvec.shape[0]):
@@ -709,21 +724,27 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             taui_by_ccden = self.safe_divide(taui, ccden)
             scale_rad = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
 
-            clipped_deltawvec = scale_rad * (stacked_wvec - stacked_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            clipped_aggdeltawvec = torch.mean(clipped_deltawvec, axis = 0)
+            ## start core
+            clipped_fully_deltawvec = scale_rad * (sfully_wvec - sfully_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_fully_aggdeltawvec = torch.mean(clipped_fully_deltawvec, axis = 0)
 
-            cli_wvec = stacked_aggwvec_tminus1[i] + clipped_aggdeltawvec
-            outref_aggwvec[i, :] = cli_wvec
+            cli_fully_wvec = sfully_aggwvec_tminus1[i] + clipped_fully_aggdeltawvec
+            outfully_aggwvec[i, :] = cli_fully_wvec
 
             radii_scales.append(scale_rad.flatten().tolist())
-            agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
+            agg_states = fedops.set_param_in_state(state_dict_struct, cli_fully_wvec)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
+            ## end core
 
-        agg_states = fedops.set_param_in_state(state_dict_struct, outref_aggwvec.mean(dim=0))
+            outref_aggwvec[i, :] = fedops.get_param_from_state(agg_states, keys_to_ignore=self.state_ignore)
+
+
+        agg_states = fedops.set_param_in_state(state_dict_struct, outfully_aggwvec.mean(dim=0))
         agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
 
         self.wvec_tminus1    = stacked_wvec.clone()
         self.aggwvec_tminus1 = outref_aggwvec.clone()
+        self.fully_aggwvec_tminus1 = outfully_aggwvec.clone()
 
         info_dict = {"client_clip_weightage":radii_scales}
         return agg_states_cli, info_dict
