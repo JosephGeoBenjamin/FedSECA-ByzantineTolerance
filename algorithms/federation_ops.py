@@ -63,7 +63,7 @@ def global_average_statedict(w:list, device = "cpu"):
     for key in w_avg.keys():
         w_avg[key] = w_avg[key].to(device)
         for i in range(1, len(w)):
-            w_avg[key] += w[i][key].to(device)
+            w_avg[key] = w_avg[key] + w[i][key].to(device)
         w_avg[key] = torch.div(w_avg[key], len(w))
     return w_avg
 
@@ -100,16 +100,17 @@ def set_param_in_model(model, param_vec, only_with_grad=False):
     return model
 
 
-def set_param_in_state(state_dict, param_vec):
+def set_param_in_state(state_dict, param_vec, keys_to_ignore:list=[]):
     """ No inplace; only rely on return
     keys_to_ignore:  can be list subset string or full key name
     """
     start = 0
     for key, value in state_dict.items():
-        # param_vec.append(value.view(-1).float())
-        end = start + value.view(-1).shape[0]
-        state_dict[key] = torch.clone(param_vec[start:end].view(value.shape))
-        start = end
+        if ( sum([i in key for i in keys_to_ignore]) == 0 ):
+            # param_vec.append(value.view(-1).float())
+            end = start + value.view(-1).shape[0]
+            state_dict[key] = torch.clone(param_vec[start:end].view(value.shape))
+            start = end
     assert (end == len(param_vec)), f"Mismatch in Sizes in set_param : {end} vs {len(param_vec)}"
     return state_dict
 

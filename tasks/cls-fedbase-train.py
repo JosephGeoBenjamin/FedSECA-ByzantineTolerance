@@ -274,6 +274,10 @@ class ClsFedHandler(object):
                                             start=epoch*len(self.trainloader)
                                             ),
                                         disable=CFG.disable_tqdm):
+        # for step in tqdm(range(epoch*100, (epoch+1)*100, 1), disable=CFG.disable_tqdm):
+        #     img, tgt = self.get_step_data()
+
+            #------------------------------------------
             img = img.to(self.device, non_blocking=True)
             tgt = tgt.to(self.device, non_blocking=True)
             if img.shape[0] < 2: continue # fix last batch size being 1 issue
@@ -383,6 +387,13 @@ class ClsFedHandler(object):
 
         self.local_optim.zero_grad()
 
+    def get_step_data(self):
+        try: step_data = next(self.step_loader)
+        except StopIteration:
+            self.step_loader = iter(self.trainloader)
+            step_data = next(self.step_loader)
+
+        return step_data
 
 ### ----------------------------------------------------------------------------
 

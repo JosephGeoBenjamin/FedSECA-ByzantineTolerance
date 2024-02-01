@@ -4,6 +4,12 @@
     "byztn_clients": [],
     "byztn_method" : "AffineζAttack",
     "scale":-1
+    },
+
+    {
+    "byztn_clients": [],
+    "byztn_method" : "NaifttCraftedζAttack",
+    "lambda":0.1
     }
 
 ],

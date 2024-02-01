@@ -46,7 +46,7 @@ class NaifttCraftedζAttack():
 
     def __init__(self, cfg, model ):
         self.byz_cfg = cfg.byztn_cfg
-        self.lmbd = cfg.byztn_cfg["lambda"]
+        self.lmbd = cfg.byztn_cfg["lambda"] # 0.1 in paper
 
         self.wvec_tminus_1 = fedops.get_param_from_state(model.state_dict())
 
