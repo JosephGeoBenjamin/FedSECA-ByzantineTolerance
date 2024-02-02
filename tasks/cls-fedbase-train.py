@@ -5,7 +5,7 @@ import copy
 import numpy as np
 import torch
 from torch import nn, optim
-
+import torch.nn.functional as torch_F
 import torchinfo
 from tqdm.autonotebook import tqdm
 
@@ -246,7 +246,8 @@ class ClsFedHandler(object):
         self.step_loader = iter(trainloader)
         self.local_optim = None
         self.local_scaler = None
-        self.local_model = None
+        self.local_model  = None # copy undergoing training
+        self.gdsyp_model  = None # copy of model received fomr server
         self.agghatch     = None
 
     def train_one_epoch(self, epoch):
@@ -260,16 +261,13 @@ class ClsFedHandler(object):
         if CFG.enable_fedprox:
             global_model_prox = copy.deepcopy(model)
 
-        if ANALYSE_MODELS:
-            model_start = copy.deepcopy(model)
-
         startValidMetric = self.run_validation(model)
         ### --------------
 
         if scheduler: scheduler.last_epoch = epoch
         stat_accum = {}; locstat = {}
-        model.train()
 
+        model.train()
         for step, (img, tgt) in tqdm(enumerate(self.trainloader,
                                             start=epoch*len(self.trainloader)
                                             ),
@@ -321,9 +319,10 @@ class ClsFedHandler(object):
         lutl.LOG2DICTXT(logs, CFG.gLogPath +'/train-local-stats.txt')
         lutl.LOG2CSV( [self.id,"#",epoch,"#"]+self.trainMetric.nnloss, CFG.gLogPath +'/metrics/train-losses.csv')
 
+        ## best val checkpoint
         best_flag = False
         if self.loc_val_best < logs['validF1']:
-            torch.save(model.state_dict(), CFG.gWeightPath +f'/best_local_model_{self.id}.pth')
+            # torch.save(model.state_dict(), CFG.gWeightPath +f'/best_local_model_{self.id}.pth') ##commenting since unused
             self.loc_val_best = logs['validF1']
             best_flag = True
             detail_stat = dict( ctime= time.ctime(),
@@ -337,16 +336,21 @@ class ClsFedHandler(object):
 
 
         if ANALYSE_MODELS:
-            model_diff_vec = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"]) \
-                    - fedops.get_param_from_state(model_start.state_dict(), keys_to_ignore=["num_batches_tracked"])
+            model_start = self.gdsyp_model
+            curr_mvec = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"])
+            strt_mvec = fedops.get_param_from_state(model_start.state_dict(), keys_to_ignore=["num_batches_tracked"])
+            model_diff_vec = curr_mvec - strt_mvec
 
-            diff_dict = {"client": self.id, "epoch":epoch,
-                              "delta_l2norm": torch.norm(model_diff_vec).item() }
+            diff_dict ={"client": self.id, "epoch":epoch,
+                        "delta_l2norm": torch.norm(model_diff_vec).item(),
+                        "weight_cosim": torch_F.cosine_similarity(
+                                curr_mvec.view(1,-1), strt_mvec.view(1,-1)).item(), }
+
             diff_dict["Layerwise"] =  fedutl.find_layerwise_weight_difference(model, model_start)
             lutl.LOG2DICTXT(diff_dict, CFG.gLogPath +'/trainAnsys-Wdiff_g-epochwise.txt', console=False)
 
             return_result["model_diff_vec"] = model_diff_vec
-            return_result["model_vec"] = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"])
+            return_result["model_vec"] = curr_mvec
 
         ## end >>>>> analyse_models
 
@@ -373,6 +377,7 @@ class ClsFedHandler(object):
 
     def update_parameters(self, model, agghatch=None):
         self.local_model = copy.deepcopy(model).to(self.device)
+        self.gdsyp_model = copy.deepcopy(model).to(self.device).eval()
         self.local_optim = optim.AdamW(self.local_model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)
         self.local_scaler = torch.cuda.amp.GradScaler() # for mixed precision
@@ -499,16 +504,19 @@ def simple_main(model_key=None, folder_suffix=""):
         global_aggset = global_fedprtcl.aggregate_globally(local_clues_for_fed, device=g_device)
 
         ## caching to global_object for analysis
+        global_model_tminus1 = global_model
         global_model, global_agghatch = global_fedprtcl.desynopsize_local(
                                                 global_aggset, device=g_device,)
 
         if ANALYSE_MODELS:
-            l2_norm_dist = []
+            l2norm_dist  = []
+            cosine_sim   = []
             diff_l2_norm = []
             diff_cos_sim = []
             for info1 in local_info_for_ansys:
-                l2nrm = []
-                difl2 = []
+                cosim  = []
+                l2nrm  = []
+                difl2  = []
                 difcos = []
                 for info2 in local_info_for_ansys:
                     dv1 = info1["model_diff_vec"].to(g_device)
@@ -517,12 +525,14 @@ def simple_main(model_key=None, folder_suffix=""):
                     v2 = info2["model_vec"].to(g_device)
                     l2nrm.append(torch.norm(v1-v2).item())
                     difl2.append(torch.norm(dv1-dv2).item())
-                    difcos.append(nn.functional.cosine_similarity(dv1.view(1,-1), dv2.view(1,-1)).item()  )
-                l2_norm_dist.append(l2nrm)
+                    cosim.append(torch_F.cosine_similarity(v1.view(1,-1), v2.view(1,-1)).item()  )
+                    difcos.append(torch_F.cosine_similarity(dv1.view(1,-1), dv2.view(1,-1)).item()  )
+                l2norm_dist.append(l2nrm)
+                cosine_sim.append(cosim)
                 diff_l2_norm.append(difl2)
                 diff_cos_sim.append(difcos)
-            dists_dict = {"epoch": itr, "l2norm":l2_norm_dist,
-                        "diff_l2norm":diff_l2_norm, "diff_cosine": diff_cos_sim}
+            dists_dict = {"epoch": itr, "l2norm":l2norm_dist, "cosim": cosine_sim,
+                        "diff_l2norm":diff_l2_norm, "diff_cosim": diff_cos_sim}
             lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 
             cselect_dict = global_aggset.get("client_select")
@@ -533,15 +543,17 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
         ## save checkpoint
-        Gstep = (itr+1)/CFG.local_rounds if CFG.update_mode == "step" else itr
+        Gstep = (itr+1)//CFG.local_rounds if CFG.update_mode == "step" else itr
 
         if (Gstep+1) % CFG.ckpt_freq_Gstep == 0:
-            Gstep = int(Gstep)
-            state = dict(global_round=Gstep, global_model=global_model.state_dict())
+            state = dict(global_round=Gstep)
+            state["global_model"] = global_model.state_dict() #updated after global round
+            state["desyp_global_model"] = global_model_tminus1.state_dict() #global round begining
             ## Local-Models
             #if not CFG.enable_weight_reinit: *->to save space
             for id in traindozers.keys():
-                state[f"local_model_{id}"]= fed_locals[id].local_model.state_dict()
+                state[f"local_model_{id}"] = fed_locals[id].local_model.state_dict() #updated after local round
+                state[f"desyp_local_model_{id}"] = fed_locals[id].gdsyp_model.state_dict() #local round begining
             torch.save(state, CFG.gWeightPath +f'/checkpoint.pth')
 
 
@@ -589,7 +601,8 @@ def simple_main(model_key=None, folder_suffix=""):
         ## Test Last N epochs for non fluctuating results
         if (CFG.test_last_E_epochs is not None ) and (CFG.update_mode == "epoch"):
             if (itr+1) > (CFG.global_rounds - CFG.test_last_E_epochs):
-                test_model_list = list(state.keys())[1:]
+                test_model_list = ["global_model"]+[f"local_model_{i}"
+                                for i in range(CFG.data_centers_count)]
                 print(test_model_list)
                 simple_test(CFG.gLogPath, epochs_ran=itr,
                             model_list=test_model_list,
@@ -600,8 +613,8 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
 
-def simple_test(saved_logpath, epochs_ran=None,
-                model_list=["global_model"], folder_suffix="",
+def simple_test(saved_logpath, model_list=["global_model"],
+                epochs_ran=None, folder_suffix="",
                 test_best=True):
 
     gpu_device = torch.device("cuda")
@@ -622,6 +635,7 @@ def simple_test(saved_logpath, epochs_ran=None,
 
     for m in model_list:
         pth_list = {}
+        pth_list["start"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"desyp_{m}"]
         pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"]
         if test_best: pth_list["best"] = torch.load(saved_logpath+f"/weights/best_{m}.pth")
 
@@ -679,7 +693,7 @@ if __name__ == '__main__':
                                 for i in range(CFG.data_centers_count)]
 
         logpth = simple_main(model_key=model_key, folder_suffix=folder_suffix)
-        simple_test(logpth, test_model_list)
+        # simple_test(logpth, model_list=test_model_list)
 
     ##-----
 
