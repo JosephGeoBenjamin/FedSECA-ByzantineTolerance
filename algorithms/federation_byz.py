@@ -502,7 +502,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_weightage = self._mena_soft_weightage(data_dist)
+        self.client_weightage = self._preset_weightage(data_dist)
 
         print("Defense: Decoupled WeighOmega-SKHD")
 
@@ -515,11 +515,15 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
     ##--------------------
 
-    def _datavolume_based(self, data_dist):
-        ## FOR ISIC dataset
+    def _preset_weightage(self, data_dist):
         K = data_dist.shape[0]
-        return torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]*K).view(K,K)
 
+        ## FOR ISIC dataset
+        # matx = torch.tensor([0.53,0.17,0.14,0.10,0.04,0.02]*K).view(K,K)
+
+        matx = torch.ones((K,K)) * (1/K)
+
+        return matx
 
     def _distance_naive_softmin_weightage(self, data_dist):
         data_dist = (data_dist + data_dist.T) / 2
@@ -647,7 +651,7 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
+        self.client_clip_factor = self._get_constant_tau(data_dist)
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
@@ -676,10 +680,10 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
 
     def _get_constant_tau(self, data_dist):
-        ## TODO: fix
-        tau_val = 10
         K = data_dist.shape[0]
-        return None
+        tau_val = 1.0
+        matx = torch.ones((K,K)) * tau_val
+        return matx
 
 
     def _get_lmbda_from_dist(self, data_dist):
@@ -731,29 +735,35 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
-        ## trying differnt tau computes
-        # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_aggwvec_tminus1 - stacked_wvec, dim=1).view(-1, 1) #---> [1]
-        # tau_rad = lmbda_dist.to(self.device) * torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)    #---> [2]
-        # tau_rad = lmbda_dist.to(self.device) * torch.sqrt(torch.norm(stacked_wvec_tminus1 - stacked_wvec, dim=1).mean(dim=0)) #--->[3]
-        tau_rad = lmbda_dist.to(self.device) * torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [4]
+        ## Tau Computes
+        tau_rad = lmbda_dist.to(self.device) * torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
+        ## Theta Computes
+        cos_pow = 100 * torch_F.cosine_similarity(self.wvec_0th, stacked_wvec, dim=1).view(-1, 1)
 
-
-        radii_scales = []
+        sector_scales = []; rad_scales = []; cos_scales = []
         for i in range(stacked_wvec.shape[0]):
             taui = tau_rad[i].view(-1, 1)
             ccden = torch.norm(stacked_wvec - stacked_wvec[i], dim=1).view(-1,1)
-
             taui_by_ccden = self.safe_divide(taui, ccden)
-            scale_rad = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
+            rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
+
+            cosbas = torch_F.cosine_similarity(stacked_wvec, stacked_wvec[i], dim=1).view(-1,1)
+            cos_comp = torch.pow(torch.maximum(torch.tensor(0), cosbas), cos_pow)
+
+            scale_sec = rad_comp * cos_comp
 
             ## start core
-            clipped_fully_deltawvec = scale_rad * (sfully_wvec - sfully_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            clipped_fully_aggdeltawvec = torch.mean(clipped_fully_deltawvec, axis = 0)
+            clipped_fully_deltawvec = scale_sec * (sfully_wvec - sfully_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_fully_aggdeltawvec = \
+                torch.sum(clipped_fully_deltawvec, axis = 0) / torch.sum(scale_sec)
 
             cli_fully_wvec = sfully_aggwvec_tminus1[i] + clipped_fully_aggdeltawvec
             outfully_aggwvec[i, :] = cli_fully_wvec
 
-            radii_scales.append(scale_rad.flatten().tolist())
+            sector_scales.append(scale_sec.flatten().tolist())
+            rad_scales.append(rad_comp.flatten().tolist())
+            cos_scales.append(cos_comp.flatten().tolist())
+
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_fully_wvec)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
             ## end core
@@ -769,5 +779,8 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.aggwvec_tminus1 = outref_aggwvec.clone()
         self.fully_aggwvec_tminus1 = outfully_aggwvec.clone()
 
-        info_dict = {"client_clip_weightage":radii_scales}
+        info_dict = {"client_clip_weightage":sector_scales,
+                     "radius_component": rad_scales,
+                     "cosine_component": cos_scales}
+
         return agg_states_cli, info_dict

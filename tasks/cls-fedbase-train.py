@@ -442,6 +442,7 @@ def simple_main(model_key=None, folder_suffix=""):
     else:
         saved_global_round = 0
 
+    #TODO: fix to run specific clients Federated training alone
 
     ### LOCAL SILOS setup
     agghatch        = None   # expanded/desynopsized information w.r.t local model
@@ -504,7 +505,7 @@ def simple_main(model_key=None, folder_suffix=""):
         global_aggset = global_fedprtcl.aggregate_globally(local_clues_for_fed, device=g_device)
 
         ## caching to global_object for analysis
-        global_model_tminus1 = global_model
+        global_model_tminus1 = copy.deepcopy(global_model)
         global_model, global_agghatch = global_fedprtcl.desynopsize_local(
                                                 global_aggset, device=g_device,)
 
