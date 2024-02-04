@@ -32,6 +32,7 @@ dataset = "ISIC",
 data_root_path  = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed",
 data_centers_count = 6,
 test_partitions = 6,
+center_inclusion_filter = [],
 override_csv = None,
 seed = 73,
 
@@ -140,7 +141,8 @@ def getDataLoaders(cfg, center_index=None, type="train"):
 
     if type =="train":
         traindozers = {}; validdozers = {}
-        for cen in list(range(cfg.data_centers_count)):
+        cen_list = range(cfg.data_centers_count) if not cfg.center_inclusion_filter else cfg.center_inclusion_filter
+        for cen in list(cen_list):
             traindozers[cen], validdozers[cen] = trainloader(cfg=cfg, center_index = cen)
         _, validdozers["all"] = trainloader(cfg=cfg, center_index = "all")
 
@@ -189,14 +191,13 @@ def getModel(model_key=None, device="cpu"):
 def getFedProtocol():
     if CFG.fed_approach == "fedavg+state":
         fedProtocol = fedops.SimpleStateΞFedAvg
-    elif CFG.fed_approach == "fedavg+param":
-        fedProtocol = fedops.SimpleParamΞFedAvg
-    elif CFG.fed_approach == "fedavg+deltaparam":
-        fedProtocol = fedops.DeltaParamΞFedAvg
 
     elif CFG.fed_approach == "fedavg+byzantine":
         fedProtocol = fedbyz.NoGuardΞByzantine  #default
         fedProtocol = getattr(fedbyz, CFG.defense_cfg["defense_method"])
+
+        if bool(CFG.center_inclusion_filter):
+            raise Exception("Can't filter datacenters in Byzantine Method;; its a TODO") # remove dependency on CFG.data_centers
 
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
@@ -422,6 +423,9 @@ def simple_main(model_key=None, folder_suffix=""):
 
     save_current_configs(CFG)
 
+    ### PROTOCOL
+    fedProtocol = getFedProtocol()
+
     ### DATA ACCESS
     traindozers, validdozers = getDataLoaders(CFG, type="train")
 
@@ -430,7 +434,6 @@ def simple_main(model_key=None, folder_suffix=""):
     global_model = getModel(model_key, g_device)
     lossfn = getLossFunc()
 
-    fedProtocol = getFedProtocol()
 
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
@@ -599,11 +602,17 @@ def simple_main(model_key=None, folder_suffix=""):
                 )
             lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-global-bests.txt', console=False)
 
+
+        ## --------- Testing routines ---------------
+        test_model_list = ["global_model"]+[f"local_model_{id}"
+                                for id in traindozers.keys()]
+
+        ## Test every epoch for plotting
+
+
         ## Test Last N epochs for non fluctuating results
         if (CFG.test_last_E_epochs is not None ) and (CFG.update_mode == "epoch"):
             if (itr+1) > (CFG.global_rounds - CFG.test_last_E_epochs):
-                test_model_list = ["global_model"]+[f"local_model_{i}"
-                                for i in range(CFG.data_centers_count)]
                 print(test_model_list)
                 simple_test(CFG.gLogPath, epochs_ran=itr,
                             model_list=test_model_list,
@@ -616,6 +625,7 @@ def simple_main(model_key=None, folder_suffix=""):
 
 def simple_test(saved_logpath, model_list=["global_model"],
                 epochs_ran=None, folder_suffix="",
+                test_partitions = CFG.test_partitions,
                 test_best=True):
 
     gpu_device = torch.device("cuda")
@@ -647,7 +657,7 @@ def simple_test(saved_logpath, model_list=["global_model"],
             lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
                         dir_to_save +'/misc.txt')
 
-            test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
+            test_center_num = test_partitions if test_partitions>1 else 0
             for c in ["all"]+ list(range(test_center_num)):
                 testloader = getDataLoaders(CFG, center_index=c, type="test")
                 testMetric = MultiClassMetrics(dir_to_save+ f"/metrics/{p_k}-test")
