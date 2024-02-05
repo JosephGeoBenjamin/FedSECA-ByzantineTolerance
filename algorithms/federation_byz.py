@@ -651,7 +651,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_clip_factor = self._get_constant_tau(data_dist)
+        self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
@@ -691,11 +691,12 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         data_dist = torch.tensor(data_dist)
         K = data_dist.shape[0] #clients
 
-        rmean_dist = torch.sum(data_dist, dim=0) / K
+        # rmean_dist = torch.sum(data_dist, dim=0) / K
+        # all_dist = data_dist + (rmean_dist * torch.eye(K, dtype=float).to_dense())
 
-        all_dist = data_dist + (rmean_dist * torch.eye(K, dtype=float).to_dense())
+        own_dist = torch.diag(data_dist)
 
-        lambda_dist = torch.div(all_dist, rmean_dist.view(K, 1))
+        lambda_dist = torch.div(data_dist, own_dist.view(-1, 1))
         lambda_dist = 1 + torch.abs(1 - lambda_dist)
 
         return lambda_dist
@@ -703,7 +704,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
     #-------- Server methods ----------
     def safe_divide(self, nu, de, fill=1.0):
-        res = torch.full_like(nu, fill_value=fill)
+        res = torch.full_like(de, fill_value=fill)
         mask = (de != 0.0)
 
         if (nu.shape == mask.shape): nu_ = nu[mask]
@@ -736,7 +737,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         ##
         agg_states_cli = {}
-        lmbda_dist =self.client_clip_factor
+        lmbda_dist = self.client_clip_factor.to(self.device)
 
         print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
@@ -755,7 +756,9 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             cosbas = torch_F.cosine_similarity(stacked_wvec, stacked_wvec[i], dim=1).view(-1,1)
             cos_comp = torch.pow(torch.maximum(torch.tensor(0), cosbas), cos_pow[i])
 
-            scale_sec = rad_comp * cos_comp
+            scale_sec = rad_comp * cos_comp * lmbda_dist[i].view(-1,1)
+            scale_sec = torch.clamp(scale_sec, max=1, min=0)
+            # print("Scale Shape", scale_sec.shape)
 
             ## start core
             clipped_fully_deltawvec = scale_sec * (sfully_wvec - sfully_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
