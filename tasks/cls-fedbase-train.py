@@ -437,11 +437,14 @@ def simple_main(model_key=None, folder_suffix=""):
 
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
-        ckpt = torch.load(CFG.gWeightPath  +'/checkpoint.pth',
-                            map_location='cpu')
-        saved_global_round = ckpt['global_round']
-        global_model.load_state_dict(ckpt['global_model'])
-        lutl.LOG2TXT(f"Restarting Training from GSTEP:{saved_global_round} of {CFG.checkpoint_dir}",  CFG.gLogPath +'/misc.txt')
+        saved_global_round = 0
+        print("regarding resuming training as Chadwick Boseman said `We Don't do that here`")
+
+        # ckpt = torch.load(CFG.gWeightPath  +'/checkpoint.pth',
+        #                     map_location='cpu')
+        # saved_global_round = ckpt['global_round']
+        # global_model.load_state_dict(ckpt['global_model'])
+        # lutl.LOG2TXT(f"Restarting Training from GSTEP:{saved_global_round} of {CFG.checkpoint_dir}",  CFG.gLogPath +'/misc.txt')
     else:
         saved_global_round = 0
 
@@ -464,6 +467,9 @@ def simple_main(model_key=None, folder_suffix=""):
                                 )
         fed_locals[id].update_parameters(global_model, agghatch=agghatch) #deepcopies inside
 
+    if ANALYSE_MODELS:
+        zeroth_wvec =   fedops.get_param_from_state( global_model.state_dict(),
+                                    keys_to_ignore=["num_batches_tracked"])
 
     if not CFG.enable_weight_reinit: lutl.LOG2TXT(("&"*7)+" Forgoing FedAveraging Routine ....", CFG.gLogPath +'/misc.txt')
 
@@ -517,15 +523,16 @@ def simple_main(model_key=None, folder_suffix=""):
             cosine_sim   = []
             diff_l2_norm = []
             diff_cos_sim = []
+            zero_cos_sim = []
             for info1 in local_info_for_ansys:
                 cosim  = []
                 l2nrm  = []
                 difl2  = []
                 difcos = []
+                v1 = info1["model_vec"].to(g_device)
+                dv1 = info1["model_diff_vec"].to(g_device)
                 for info2 in local_info_for_ansys:
-                    dv1 = info1["model_diff_vec"].to(g_device)
                     dv2 = info2["model_diff_vec"].to(g_device)
-                    v1 = info1["model_vec"].to(g_device)
                     v2 = info2["model_vec"].to(g_device)
                     l2nrm.append(torch.norm(v1-v2).item())
                     difl2.append(torch.norm(dv1-dv2).item())
@@ -535,7 +542,9 @@ def simple_main(model_key=None, folder_suffix=""):
                 cosine_sim.append(cosim)
                 diff_l2_norm.append(difl2)
                 diff_cos_sim.append(difcos)
+                zero_cos_sim.append(torch_F.cosine_similarity(v1.view(1,-1), zeroth_wvec.view(1,-1)).item())
             dists_dict = {"epoch": itr, "l2norm":l2norm_dist, "cosim": cosine_sim,
+                        "zero_cosim": zero_cos_sim,
                         "diff_l2norm":diff_l2_norm, "diff_cosim": diff_cos_sim}
             lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 

@@ -633,7 +633,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 ##==============================================================================
 
 
-class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
+class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -645,7 +645,7 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
 
-        self.aggregator_func = self.__dynamic_Tau_from_Lambda_aggr_decopld
+        self.aggregator_func = self.__dynamic_Tau_Theta_Lambda_aggr_decopld
 
         with h5py.File(self.defense_cfg["datasummary"], 'r') as hdf5_file:
             data_dist = hdf5_file["dist_matrix"][()]
@@ -705,11 +705,16 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     def safe_divide(self, nu, de, fill=1.0):
         res = torch.full_like(nu, fill_value=fill)
         mask = (de != 0.0)
-        res[mask] = torch.div(nu[mask], de[mask])
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
         return res
 
 
-    def __dynamic_Tau_from_Lambda_aggr_decopld(self, lsets):
+    def __dynamic_Tau_Theta_Lambda_aggr_decopld(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
 
         #for fedavging with bn_batches_tracked; thanks to Pytorch default models for complicating life
@@ -736,19 +741,19 @@ class ClipTauSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
         ## Tau Computes
-        tau_rad = lmbda_dist.to(self.device) * torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
+        tau_rad = torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
         ## Theta Computes
         cos_pow = 100 * torch_F.cosine_similarity(self.wvec_0th, stacked_wvec, dim=1).view(-1, 1)
 
         sector_scales = []; rad_scales = []; cos_scales = []
         for i in range(stacked_wvec.shape[0]):
-            taui = tau_rad[i].view(-1, 1)
+            taui = tau_rad[i]
             ccden = torch.norm(stacked_wvec - stacked_wvec[i], dim=1).view(-1,1)
             taui_by_ccden = self.safe_divide(taui, ccden)
             rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
 
             cosbas = torch_F.cosine_similarity(stacked_wvec, stacked_wvec[i], dim=1).view(-1,1)
-            cos_comp = torch.pow(torch.maximum(torch.tensor(0), cosbas), cos_pow)
+            cos_comp = torch.pow(torch.maximum(torch.tensor(0), cosbas), cos_pow[i])
 
             scale_sec = rad_comp * cos_comp
 
