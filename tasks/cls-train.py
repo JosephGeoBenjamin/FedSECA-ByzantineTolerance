@@ -112,7 +112,7 @@ def getDataLoaders(cfg, center_index, type="train"):
     elif cfg.dataset == "CIFAR":
         from datacode.cifar100_jfed_data import getCifar100CLSLoaders as trainloader
         from datacode.cifar100_jfed_data import getCifar100TESTLoader as testloader
-    elif cfg.dataset == "ORGAN-MNIST":
+    elif cfg.dataset == "ORGANMNIST":
         from datacode.orgmnist_jfed_data import getOrganMnistCLSLoaders as trainloader
         from datacode.orgmnist_jfed_data import getOrganMnistTESTLoader as testloader
 

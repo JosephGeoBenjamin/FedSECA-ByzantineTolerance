@@ -60,7 +60,7 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
                         total_centers=cfg.data_centers_count,
                         transforms=CifarClassifyAuguments(method="infer",
                                                         image_size=img_size_in))
-    elif cfg.dataset == "ORGAN-MNIST":
+    elif cfg.dataset == "ORGANMNIST":
         from datacode.augmentations import OrganMnistClassifyAuguments
         from datacode.orgmnist_jfed_data import OrganMnist_JFedDataset
         img_size_in   = cfg.image_size
@@ -544,7 +544,7 @@ def run_for_isicflamby():
 
 
 def run_for_organmnist():
-    CFG.dataset   = "ORGAN-MNIST"
+    CFG.dataset   = "ORGANMNIST"
     CFG.weight_root_path = "hypotheses/Cls1-organ/E00-base(ansys/E00-ClsOr-Resnet-000_B32_Lr1e-3/"
 
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/organmnist-jfed/"

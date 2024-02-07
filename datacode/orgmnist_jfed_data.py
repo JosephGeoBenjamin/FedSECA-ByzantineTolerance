@@ -125,11 +125,11 @@ def getOrganMnistCLSLoaders(cfg, center_index = None, override_csv = None):
                         batch_size=batch_size, num_workers=workers,
                         pin_memory=True)
 
-    lutl.LOG2DICTXT({"DC":("ORGAN-MNIST", center_index), "Train-":len(traindataset),
+    lutl.LOG2DICTXT({"DC":("ORGANMNIST", center_index), "Train-":len(traindataset),
                      "Transform": str(traindataset.transforms.get_composition()),
                     #  "class-weights":str(class_weights)
                      }, info_log_path)
-    lutl.LOG2DICTXT({"DC":("ORGAN-MNIST", center_index), "Valid-":len(validdataset),
+    lutl.LOG2DICTXT({"DC":("ORGANMNIST", center_index), "Valid-":len(validdataset),
                      "Transform": str(validdataset.transforms.get_composition()),
                      }, info_log_path)
 
@@ -160,7 +160,7 @@ def getOrganMnistTESTLoader(cfg, center_index = None):
                         batch_size=batch_size, num_workers=workers,
                         pin_memory=True)
 
-    lutl.LOG2DICTXT({"DC":("ORGAN-MNIST", center_index), "TEST-":len(dataset),
+    lutl.LOG2DICTXT({"DC":("ORGANMNIST", center_index), "TEST-":len(dataset),
                     "Transform": str(dataset.transforms.get_composition()),
                      }, info_log_path)
 
@@ -189,7 +189,7 @@ def getOrganMnistSSLLoader(cfg, center_index = None, ssl_transforms=None):
                         drop_last=True, ## Important
                         pin_memory=True)
 
-    lutl.LOG2DICTXT({"DC":("ORGAN-MNIST", center_index), "SSL-":len(dataset),
+    lutl.LOG2DICTXT({"DC":("ORGANMNIST", center_index), "SSL-":len(dataset),
                      "Transform": str(dataset.transforms.get_composition()),
                      }, info_log_path)
 
