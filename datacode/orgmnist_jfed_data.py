@@ -30,9 +30,14 @@ class OrganMnist_JFedDataset(torch.utils.data.Dataset):
     ):
 
         # cls_csv = csv_name if csv_name else  "organmnist_clsfy_data.csv"
-        cls_csv = csv_name if csv_name else  "organmnist_Full_Train_data.csv"
+        # cls_csv = csv_name if csv_name else  "organmnist_Full_Train_data.csv"
         ssl_csv = csv_name if csv_name else  "organmnist_ssl_data.csv"
-        test_csv = csv_name if csv_name else "organmnist_test_data.csv"
+        # test_csv = csv_name if csv_name else "organmnist_test_data.csv"
+        total_centers = 3 # ACS
+
+        cls_csv = csv_name if csv_name else  "organmnist_Full_TrainV2_data.csv"
+        test_csv = csv_name if csv_name else "organmnist_testV2_data.csv"
+        total_centers = 6 #A/2, C/2, S/2
 
         if data_path:
             if not (os.path.exists(data_path)):
@@ -57,7 +62,7 @@ class OrganMnist_JFedDataset(torch.utils.data.Dataset):
 
         if len(self.images_root) ==0: raise ("No images path read, plase check path and folder name `train_images/test_images`")
 
-        self.total_centers = 3
+        self.total_centers = total_centers
         self.center = center
         self.label_type = label_type
         self.pooled = True if center == "all" else False

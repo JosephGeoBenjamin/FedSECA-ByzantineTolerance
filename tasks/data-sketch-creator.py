@@ -29,7 +29,7 @@ from sketching.sinkhorn_metric import sinkhorn_pointcloud_pytorch
 
 CFG = rutl.ObjDict(
     cloud_point_count = 1000,
-    checkpoint_dir= "hypotheses/DataSketchColl/main-001/1K-pts/",
+    checkpoint_dir= "hypotheses/DataSketchColl/ORGAN-main-002/1K-pts/",
 )
 
 ### ----------------------------------------------------------------------------
@@ -143,6 +143,23 @@ def min_max_scale(data):
     return scaled_data
 
 
+def find_orthogonal_vector_numpy(v_matrix, dim=1):
+    """ takes NxD matrix
+    """
+    # Create a random matrix of the same shape as v_matrix
+    random_vecs = np.random.rand(*v_matrix.shape)
+
+    # Project the random matrix onto v_matrix along the specified dimension
+    # equivalent => projection = np.dot(random_vector, v) / np.dot(v, v) * v
+    projection = np.sum(random_vecs * v_matrix, axis=dim, keepdims=True) \
+        / np.sum(v_matrix**2, axis=dim, keepdims=True) * v_matrix
+
+    # Subtract the projection from the random matrix to get an orthogonal matrix
+    orthogonal_vecs = random_vecs - projection
+
+    return orthogonal_vecs
+
+
 class ModelFeatureMean():
     def __init__(self, model_name ,weight_path=None ,device="cuda") -> None:
         self.model = getModel(model_name)
@@ -206,7 +223,7 @@ class ModelFeatureGaussDistribution():
         if weight_path: self.model = pretrained_weight_loader(self.model, weight_path)
 
         self.model.eval()
-        self.classwise = classwise
+        self.classwise = classwise #This will make it Class-based GMMs
         self.counter = 0
         self.full_featp_holder = []
         self.class_featp_holder = {}
@@ -295,6 +312,8 @@ class ModelFeatureGaussDistribution():
 
                     array1 = hdf5_file[key1][()]
                     array2 = hdf5_file[key2][()]
+                    if key1 == key2:
+                        array2 = find_orthogonal_vector_numpy(array2)
 
                     # Calculate L2 norm distance
                     # distance = np.linalg.norm(min_max_scale(array1) - min_max_scale(array2))
@@ -515,7 +534,7 @@ def run_for_cifar100():
 
 def run_for_isicflamby():
     CFG.dataset   = "ISIC"
-    CFG.weight_root_path = "hypotheses/Cls1-isic/E00-Cls-Resnet_Baseline-01"
+    CFG.weight_root_path = "hypotheses/Cls1-isic/E00-base(ansys/E00m-Cls-Resnet-002_B32_Lr1e-4/"
 
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed/"
     CFG.data_centers_count = 6
@@ -526,8 +545,10 @@ def run_for_isicflamby():
 
 def run_for_organmnist():
     CFG.dataset   = "ORGAN-MNIST"
-    CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/organmnist-jfed"
-    CFG.data_centers_count = 3
+    CFG.weight_root_path = "hypotheses/Cls1-organ/E00-base(ansys/E00-ClsOr-Resnet-000_B32_Lr1e-3/"
+
+    CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/organmnist-jfed/"
+    CFG.data_centers_count = 6
     CFG.image_size = 224
 
     data_sketch_main(CFG)
@@ -569,7 +590,8 @@ if __name__ == '__main__':
 
     # run_for_mnist()
     # run_for_cifar100()
-    run_for_isicflamby()
+    # run_for_isicflamby()
+    run_for_organmnist()
 
 
 
