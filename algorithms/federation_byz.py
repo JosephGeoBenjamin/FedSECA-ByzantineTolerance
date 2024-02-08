@@ -166,12 +166,12 @@ class NoGuardΞByzantineDecopl():
         self.id = id
         self.device = device
         self.byz_way = None
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
-
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
+
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None decouple")
@@ -276,13 +276,13 @@ class KrumΞByzantine(NoGuardΞByzantine):
         self.id = id
         self.device = device
         self.byz_way = None
-        self.num_client_k = int(cfg.data_centers_count) # K
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
-
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__krum_aggregation
         self.krum_m  = int(self.defense_cfg["multikrum_m"]) # M
@@ -352,13 +352,13 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         self.id = id
         self.device = device
         self.byz_way = None
-        self.num_client_k = int(cfg.data_centers_count) # K
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
-
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__dos_aggregation
         self.cpd_l2 = COPOD()
@@ -505,13 +505,13 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.id = id
         self.device = device
         self.byz_way = None
-        self.num_client_k = int(cfg.data_centers_count) # K
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
-
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__dataweightage_aggregation_decopld
 
@@ -652,13 +652,14 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.id = id
         self.device = device
         self.byz_way = None
-        self.num_client_k = int(cfg.data_centers_count) # K
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
-
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
 
         self.aggregator_func = self.__dynamic_Tau_Theta_Lambda_aggr_decopld
 
