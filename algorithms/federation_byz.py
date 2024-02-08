@@ -62,32 +62,40 @@ class NoGuardΞByzantine():
         self.id = id
         self.device = device
         self.byz_way = None
-        self.model_0th = copy.deepcopy(model)
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
+
+        self.gmodel_0th  = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None")
 
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
+
+
+    def _init_byzantiness(self):
+        byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+        if id in byz_clients:
+            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_0th)
+            print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
     #-------- Client methods ----------
 
-    # @instancemethod #Locals calculation to send to Global
-    def synopsize_local(self, zxs): #used at end of local round at each client
+    # @instancemethod #Locals calculation to send to Global L->G
+    # used after One set local-rounds at each client
+    def synopsize_local(self, zxs):
         """ zxs: {"model", }
         """
         lset = {}
         model = fedops.model_copier(zxs["model"])
 
         if self.byz_way:
-            out_state = self.byz_way.modify(model.state_dict())
+            out_state = self.byz_way.modify(model.state_dict(),
+                                            self.gmodel_tth.state_dict())
         else:
             out_state = model.state_dict()
 
@@ -97,13 +105,14 @@ class NoGuardΞByzantine():
 
     #-------- Shared methods ----------
 
-    # @instancemethod #process global info for local use
-    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
+    # @instancemethod # Process Global info for Local use G->L
+    # used at end of Global Comm at each client
+    def desynopsize_local(self, gset, device=None, model_struct=None):
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
         """
-        model_struct = self.model_0th if not model_struct else model_struct
-        if not device: device = next(model_struct.parameters()).device
+        model_struct = self.gmodel_0th if not model_struct else model_struct
+        if not device: device = self.device
 
         ## since no compression or sketching used
         model = copy.deepcopy(model_struct)
@@ -111,7 +120,9 @@ class NoGuardΞByzantine():
 
         model.load_state_dict(copy.deepcopy(gset["model_state"]), strict=True)
         model = model.to(device)
+
         ghatch = {}
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu")
 
         return model, ghatch
 
@@ -132,7 +143,6 @@ class NoGuardΞByzantine():
     def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
-        if not device: device = next(self.model_0th.parameters()).device
 
         agg_state, select_info = self.aggregator_func(lsets)
 
@@ -156,7 +166,9 @@ class NoGuardΞByzantineDecopl():
         self.id = id
         self.device = device
         self.byz_way = None
-        self.model_0th = copy.deepcopy(model)
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
@@ -165,10 +177,14 @@ class NoGuardΞByzantineDecopl():
         print("DEFENSE: None decouple")
 
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
+
+
+    def _init_byzantiness(self):
+        byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+        if id in byz_clients:
+            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_0th)
+            print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
     #-------- Client methods ----------
@@ -178,10 +194,11 @@ class NoGuardΞByzantineDecopl():
         """ zxs: {"model", }
         """
         lset = {}
-        model = fedops.model_copier(zxs["model"])
+        model = fedops.model_copier(zxs["model"]) #after a local-rounds set
 
         if self.byz_way:
-            out_state = self.byz_way.modify(model.state_dict())
+            out_state = self.byz_way.modify(model.state_dict(),
+                                            self.gmodel_tth.state_dict())
         else:
             out_state = model.state_dict()
 
@@ -196,7 +213,7 @@ class NoGuardΞByzantineDecopl():
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
         """
-        model_struct = self.model_0th if not model_struct else model_struct
+        model_struct = self.gmodel_0th if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
@@ -209,7 +226,9 @@ class NoGuardΞByzantineDecopl():
 
         model.load_state_dict(state_cli, strict=True)
         model = model.to(device)
+
         ghatch = {}
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu")
 
         return model, ghatch
 
@@ -235,7 +254,6 @@ class NoGuardΞByzantineDecopl():
     def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
-        if not device: device = next(self.model_0th.parameters()).device
 
         agg_states_cli, select_info = self.aggregator_func(lsets)
 
@@ -259,7 +277,9 @@ class KrumΞByzantine(NoGuardΞByzantine):
         self.device = device
         self.byz_way = None
         self.num_client_k = int(cfg.data_centers_count) # K
-        self.model_0th = copy.deepcopy(model)
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
@@ -275,10 +295,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
 
 
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("Byz Method", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
 
 
 
@@ -336,7 +353,9 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         self.device = device
         self.byz_way = None
         self.num_client_k = int(cfg.data_centers_count) # K
-        self.model_0th = copy.deepcopy(model)
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
@@ -350,10 +369,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         print("Defense: Copod-DOS")
 
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("Byz Method", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
 
 
 
@@ -407,7 +423,9 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
         self.device = device
         self.byz_way = None
         self.num_client_k = int(cfg.data_centers_count) # K
-        self.model_0th = copy.deepcopy(model)
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
@@ -423,10 +441,7 @@ class WeighAlphaSKDHΞByzantine(NoGuardΞByzantine):
         print("Defense: WeighAlpha-SKHD")
 
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("Byz Method", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
 
     ##--------------------
 
@@ -491,7 +506,9 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.device = device
         self.byz_way = None
         self.num_client_k = int(cfg.data_centers_count) # K
-        self.model_0th = copy.deepcopy(model)
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
@@ -506,12 +523,8 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         print("Defense: Decoupled WeighOmega-SKHD")
 
-
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("Byz Method", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
 
     ##--------------------
 
@@ -640,7 +653,9 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.device = device
         self.byz_way = None
         self.num_client_k = int(cfg.data_centers_count) # K
-        self.model_0th = copy.deepcopy(model)
+        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+
         self.cfg = cfg
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
@@ -662,20 +677,17 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
 
         if len(self.byztn_cfg) != 0:
-            byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-            if id in byz_clients:
-                self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(cfg, model)
-                print("Byz Method", self.byztn_cfg["byztn_method"])
+            self._init_byzantiness()
 
     ##--------------------
 
     def init_stacked_wvecs(self):
-        wvec = fedops.get_param_from_state(self.model_0th.state_dict(),
+        wvec = fedops.get_param_from_state(self.gmodel_0th.state_dict(),
                         keys_to_ignore=self.vec_state_ignore)
         self.wvec_0th = wvec
         self.aggwvec_tminus1 = torch.vstack( [wvec]*self.num_client_k )
         self.wvec_tminus1    = self.aggwvec_tminus1.clone()
-        fully_wvec =  fedops.get_param_from_state(self.model_0th.state_dict())
+        fully_wvec =  fedops.get_param_from_state(self.gmodel_0th.state_dict())
         self.fully_aggwvec_tminus1 = torch.vstack( [fully_wvec]*self.num_client_k )
 
 
