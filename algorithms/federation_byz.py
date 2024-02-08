@@ -744,7 +744,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         ## Tau Computes
         tau_rad = torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
         ## Theta Computes
-        cos_pow = 100 * torch_F.cosine_similarity(self.wvec_0th, stacked_wvec, dim=1).view(-1, 1)
+        cos_theta = torch_F.cosine_similarity(self.wvec_0th, stacked_wvec, dim=1).view(-1, 1)
 
         sector_scales = []; rad_scales = []; cos_scales = []
         for i in range(stacked_wvec.shape[0]):
@@ -753,10 +753,12 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             taui_by_ccden = self.safe_divide(taui, ccden)
             rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
 
+            thetai = cos_theta[i]
             cosbas = torch_F.cosine_similarity(stacked_wvec, stacked_wvec[i], dim=1).view(-1,1)
-            cos_comp = torch.pow(torch.maximum(torch.tensor(0), cosbas), cos_pow[i])
+            cosbas_x_thetai = thetai*100*(cosbas-thetai)
+            cos_comp = torch_F.sigmoid(cosbas_x_thetai)
 
-            scale_sec = rad_comp * cos_comp * lmbda_dist[i].view(-1,1)
+            scale_sec = rad_comp * cos_comp #* lmbda_dist[i].view(-1,1)
             scale_sec = torch.clamp(scale_sec, max=1, min=0)
             # print("Scale Shape", scale_sec.shape)
 

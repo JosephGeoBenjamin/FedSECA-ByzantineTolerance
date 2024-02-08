@@ -65,7 +65,7 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
         from datacode.orgmnist_jfed_data import OrganMnist_JFedDataset
         img_size_in   = cfg.image_size
         traindataset = OrganMnist_JFedDataset( data_path= cfg.data_path,
-                        csv_name="organmnist_Full_Train_data.csv",
+                        csv_name="organmnist_Full_TrainV2_data.csv",
                         center= center_index,
                         split_type = split_type,
                         transforms=OrganMnistClassifyAuguments(method="infer",
