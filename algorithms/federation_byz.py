@@ -74,8 +74,8 @@ class NoGuardΞByzantine():
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
 
-        self.gmodel_init  = copy.deepcopy(model).to("cpu") # common model initialization
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init  = copy.deepcopy(model).to(self.device) # common model initialization
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None")
@@ -86,7 +86,7 @@ class NoGuardΞByzantine():
 
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-        if id in byz_clients:
+        if self.id in byz_clients:
             self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_init)
             print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
@@ -130,7 +130,7 @@ class NoGuardΞByzantine():
         model = model.to(device)
 
         ghatch = {}
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu")
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device)
 
         return model, ghatch
 
@@ -178,8 +178,8 @@ class NoGuardΞByzantineDecopl():
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
 
-        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None decouple")
@@ -190,7 +190,7 @@ class NoGuardΞByzantineDecopl():
 
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
-        if id in byz_clients:
+        if self.id in byz_clients:
             self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_init)
             print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
@@ -236,7 +236,7 @@ class NoGuardΞByzantineDecopl():
         model = model.to(device)
 
         ghatch = {}
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu")
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device)
 
         return model, ghatch
 
@@ -289,8 +289,8 @@ class KrumΞByzantine(NoGuardΞByzantine):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
 
         self.aggregator_func = self.__krum_aggregation
         self.krum_m  = int(self.defense_cfg["multikrum_m"]) # M
@@ -365,8 +365,8 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
 
         self.aggregator_func = self.__dos_aggregation
         self.cpd_l2 = COPOD()
@@ -437,8 +437,8 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
 
         self.aggregator_func = self.__dataweightage_aggregation_decopld
 
@@ -584,9 +584,8 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
-
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
 
         self.aggregator_func = self.__dynamic_Tau_Theta_Lambda_aggr_decopld
 
