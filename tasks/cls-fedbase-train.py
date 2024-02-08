@@ -468,7 +468,7 @@ def simple_main(model_key=None, folder_suffix=""):
         fed_locals[id].update_parameters(global_model, agghatch=agghatch) #deepcopies inside
 
     if ANALYSE_MODELS:
-        zeroth_wvec =   fedops.get_param_from_state( global_model.state_dict(),
+        wvec_init =   fedops.get_param_from_state( global_model.state_dict(),
                                     keys_to_ignore=["num_batches_tracked"])
 
     if not CFG.enable_weight_reinit: lutl.LOG2TXT(("&"*7)+" Forgoing FedAveraging Routine ....", CFG.gLogPath +'/misc.txt')
@@ -523,7 +523,7 @@ def simple_main(model_key=None, folder_suffix=""):
             cosine_sim   = []
             diff_l2_norm = []
             diff_cos_sim = []
-            zero_cos_sim = []
+            winit_cos_sim = []
             for info1 in local_info_for_ansys:
                 cosim  = []
                 l2nrm  = []
@@ -542,9 +542,9 @@ def simple_main(model_key=None, folder_suffix=""):
                 cosine_sim.append(cosim)
                 diff_l2_norm.append(difl2)
                 diff_cos_sim.append(difcos)
-                zero_cos_sim.append(torch_F.cosine_similarity(v1.view(1,-1), zeroth_wvec.view(1,-1)).item())
+                winit_cos_sim.append(torch_F.cosine_similarity(v1.view(1,-1), wvec_init.view(1,-1)).item())
             dists_dict = {"epoch": itr, "l2norm":l2norm_dist, "cosim": cosine_sim,
-                        "zero_cosim": zero_cos_sim,
+                        "zero_cosim": winit_cos_sim,
                         "diff_l2norm":diff_l2_norm, "diff_cosim": diff_cos_sim}
             lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 

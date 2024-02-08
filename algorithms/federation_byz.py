@@ -11,6 +11,15 @@ import pyod
 import algorithms.federation_ops as fedops
 import algorithms.byzantine_attacks as byz_attacks
 
+"""
+gmodel_init -> model recieved init communication i.e at very first broadcast of params for training
+gmodel_tminus1 -> model recieved at (T-1)th aggregation round from Server
+lmodel_tth -> gmodel_state_tminus1 updated for one set LocalRounds constituting Tth step
+                before sending to Server
+
+Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
+"""
+
 ##==============================================================================
 ## COMMONS
 
@@ -55,7 +64,6 @@ def torch_insert_diagonal(x, D = 0.0): #expand along dim=1
 
 ## **************************************
 
-
 class NoGuardΞByzantine():
 
     def __init__(self, cfg, id, model, device="cpu"):
@@ -66,8 +74,8 @@ class NoGuardΞByzantine():
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
 
-        self.gmodel_0th  = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init  = copy.deepcopy(model).to("cpu") # common model initialization
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None")
@@ -79,7 +87,7 @@ class NoGuardΞByzantine():
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
         if id in byz_clients:
-            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_0th)
+            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_init)
             print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
@@ -95,7 +103,7 @@ class NoGuardΞByzantine():
 
         if self.byz_way:
             out_state = self.byz_way.modify(model.state_dict(),
-                                            self.gmodel_tth.state_dict())
+                                            self.gmodel_tminus1.state_dict())
         else:
             out_state = model.state_dict()
 
@@ -111,7 +119,7 @@ class NoGuardΞByzantine():
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
         """
-        model_struct = self.gmodel_0th if not model_struct else model_struct
+        model_struct = self.gmodel_init if not model_struct else model_struct
         if not device: device = self.device
 
         ## since no compression or sketching used
@@ -122,7 +130,7 @@ class NoGuardΞByzantine():
         model = model.to(device)
 
         ghatch = {}
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu")
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu")
 
         return model, ghatch
 
@@ -170,8 +178,8 @@ class NoGuardΞByzantineDecopl():
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
 
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None decouple")
@@ -183,7 +191,7 @@ class NoGuardΞByzantineDecopl():
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
         if id in byz_clients:
-            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_0th)
+            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_init)
             print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
@@ -198,7 +206,7 @@ class NoGuardΞByzantineDecopl():
 
         if self.byz_way:
             out_state = self.byz_way.modify(model.state_dict(),
-                                            self.gmodel_tth.state_dict())
+                                            self.gmodel_tminus1.state_dict())
         else:
             out_state = model.state_dict()
 
@@ -213,7 +221,7 @@ class NoGuardΞByzantineDecopl():
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
         """
-        model_struct = self.gmodel_0th if not model_struct else model_struct
+        model_struct = self.gmodel_init if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device
 
         ## since no compression or sketching used
@@ -228,7 +236,7 @@ class NoGuardΞByzantineDecopl():
         model = model.to(device)
 
         ghatch = {}
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu")
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu")
 
         return model, ghatch
 
@@ -281,8 +289,8 @@ class KrumΞByzantine(NoGuardΞByzantine):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__krum_aggregation
         self.krum_m  = int(self.defense_cfg["multikrum_m"]) # M
@@ -357,8 +365,8 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__dos_aggregation
         self.cpd_l2 = COPOD()
@@ -429,8 +437,8 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
         self.aggregator_func = self.__dataweightage_aggregation_decopld
 
@@ -576,8 +584,8 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
 
-        self.gmodel_0th = copy.deepcopy(model).to("cpu") # model recieved at start
-        self.gmodel_tth  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
+        self.gmodel_init = copy.deepcopy(model).to("cpu") # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to("cpu") # model recieved at Tth global comm
 
 
         self.aggregator_func = self.__dynamic_Tau_Theta_Lambda_aggr_decopld
@@ -602,12 +610,12 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     ##--------------------
 
     def init_stacked_wvecs(self):
-        wvec = fedops.get_param_from_state(self.gmodel_0th.state_dict(),
+        wvec = fedops.get_param_from_state(self.gmodel_init.state_dict(),
                         keys_to_ignore=self.vec_state_ignore)
-        self.wvec_0th = wvec
+        self.wvec_init = wvec
         self.aggwvec_tminus1 = torch.vstack( [wvec]*self.num_client_k )
         self.wvec_tminus1    = self.aggwvec_tminus1.clone()
-        fully_wvec =  fedops.get_param_from_state(self.gmodel_0th.state_dict())
+        fully_wvec =  fedops.get_param_from_state(self.gmodel_init.state_dict())
         self.fully_aggwvec_tminus1 = torch.vstack( [fully_wvec]*self.num_client_k )
 
 
@@ -674,9 +682,9 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
         ## Tau Computes
-        tau_rad = torch.norm(self.wvec_0th - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
+        tau_rad = torch.norm(self.wvec_init - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
         ## Theta Computes
-        cos_theta = torch_F.cosine_similarity(self.wvec_0th, stacked_wvec, dim=1).view(-1, 1)
+        cos_theta = torch_F.cosine_similarity(self.wvec_init, stacked_wvec, dim=1).view(-1, 1)
 
         sector_scales = []; rad_scales = []; cos_scales = []
         for i in range(stacked_wvec.shape[0]):
