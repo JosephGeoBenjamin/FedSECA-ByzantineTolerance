@@ -325,7 +325,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
         mvals, midxs = torch.topk(torch.hstack(neighbor_dist_sum),
                                   k=self.krum_m, largest=False)
 
-        final_wvec = torch.zeros_like(wvecs[0])
+        final_wvec = torch.zeros_like(fully_wvecs[0])
         for mi in midxs.tolist():
             final_wvec +=fully_wvecs[mi]
         final_wvec /= len(midxs)
@@ -540,16 +540,16 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     #-------- Server methods ----------
 
     def __dataweightage_aggregation_decopld(self, lsets):
-        wvecs = [fedops.get_param_from_state(l["model_state"])
+        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
                     for l in lsets]
-        stacked_wvec = torch.vstack(wvecs)
-        out_ref_wvec = torch.zeros_like(stacked_wvec)
+        sfully_wvec = torch.vstack(fully_wvecs)
+        out_ref_wvec = torch.zeros_like(sfully_wvec)
 
         agg_states_cli = {}
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         for i in range(len(lsets)):
             cweigh = self.client_weightage[i,:].view(-1, 1)
-            cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            cweighed_wvec = cweigh.to(self.device) * sfully_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
             cli_wvec = torch.sum(cweighed_wvec, axis = 0)
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
