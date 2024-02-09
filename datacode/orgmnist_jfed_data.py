@@ -119,7 +119,7 @@ def getOrganMnistCLSLoaders(cfg, center_index = None, override_csv = None):
 
     trainloader  = torch.utils.data.DataLoader( traindataset, shuffle=True,
                         batch_size=batch_size, num_workers=workers,
-                        pin_memory=True, persistent_workers=True)
+                        pin_memory=True, persistent_workers=False)
 
     validloader  = torch.utils.data.DataLoader( validdataset, shuffle=False,
                         batch_size=batch_size, num_workers=workers,
