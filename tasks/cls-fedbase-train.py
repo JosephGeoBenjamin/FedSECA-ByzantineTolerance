@@ -66,9 +66,10 @@ featx_bnorm    = False,
 clsfy_layers   = [9], #First mlp inwill be set w.r.t FeatureExtractor
 clsfy_dropout  = 0.0,
 
-print_freq_lstep = 0,
-ckpt_freq_Gstep  = 1,
-test_last_E_epochs = 5,
+print_freq_lstep   = 0,
+ckpt_freq_Gstep    = 1,
+test_last_E_epochs = 5,  # detailed cross-client cross-data testing
+test_trend_full    = False, # test with pooled test for all epochs
 
 checkpoint_dir= "hypotheses/#dummy-run/trail-001",
 resume_training=False
@@ -617,7 +618,12 @@ def simple_main(model_key=None, folder_suffix=""):
                                 for id in traindozers.keys()]
 
         ## Test every epoch for plotting
-
+        if CFG.test_trend_full:
+            simple_test(CFG.gLogPath, epochs_ran=itr,
+                model_list=test_model_list,
+                folder_suffix="", ## defaults to original folder
+                ckpt_keys=["start"],
+                test_partitions=0)
 
         ## Test Last N epochs for non fluctuating results
         if (CFG.test_last_E_epochs is not None ) and (CFG.update_mode == "epoch"):
@@ -625,17 +631,19 @@ def simple_main(model_key=None, folder_suffix=""):
                 print(test_model_list)
                 simple_test(CFG.gLogPath, epochs_ran=itr,
                             model_list=test_model_list,
-                            folder_suffix=f"test-epoch-{itr}", test_best=False)
+                            folder_suffix=f"test-epoch-{itr}",
+                            ckpt_keys=["start", "last"],
+                            test_partitions=CFG.test_partitions)
 
 
     return CFG.gLogPath
 
 
 
-def simple_test(saved_logpath, model_list=["global_model"],
+def simple_test(saved_logpath, model_list:list=["global_model"],
                 epochs_ran=None, folder_suffix="",
-                test_partitions = CFG.test_partitions,
-                test_best=True):
+                ckpt_keys:list = ["start"],
+                test_partitions = CFG.test_partitions):
 
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
@@ -655,16 +663,19 @@ def simple_test(saved_logpath, model_list=["global_model"],
 
     for m in model_list:
         pth_list = {}
-        pth_list["start"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"desyp_{m}"]
-        pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"]
-        if test_best: pth_list["best"] = torch.load(saved_logpath+f"/weights/best_{m}.pth")
+        if "start" in ckpt_keys:
+            pth_list["start"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"desyp_{m}"]
+        if "last" in ckpt_keys:
+            pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"]
+        if "best" in ckpt_keys:
+            pth_list["best"] = torch.load(saved_logpath+f"/weights/best_{m}.pth")
 
         ### MODEL TESTING
         for p_k in pth_list.keys():
             pth_wgt = pth_list[p_k]
             ret_msg = model.load_state_dict(pth_wgt, strict=False)
             lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
-                        dir_to_save +'/misc.txt')
+                        dir_to_save +'/misc_test.txt')
 
             test_center_num = test_partitions if test_partitions>1 else 0
             for c in ["all"]+ list(range(test_center_num)):

@@ -57,6 +57,7 @@ clsfy_layers   = [9], #First mlp inwill be set w.r.t FeatureExtractor
 clsfy_dropout  = 0.0,
 
 test_last_E_epochs = 5,
+test_trend_full = False,
 
 checkpoint_dir  = "hypotheses/#dummy-run/trail-001",
 resume_training = False
@@ -326,18 +327,32 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
         trainMetric.reset()
         validMetric.reset()
 
+        ## --------- Testing routines ---------------
+
+        ## Test every epoch for plotting
+        if CFG.test_trend_full:
+            simple_test(CFG.gLogPath, epochs_ran=epoch,
+                folder_suffix="", ## defaults to original folder
+                ckpt_keys=["start"],
+                test_partitions=0)
+
+        ## Test Last N epochs for non fluctuating results
         if (CFG.test_last_E_epochs is not None ):
             if (epoch+1) > (CFG.epochs - CFG.test_last_E_epochs):
                 simple_test(CFG.gLogPath, epochs_ran=epoch,
-                            folder_suffix=f"test-epoch-{epoch}", test_best=False)
+                            folder_suffix=f"test-epoch-{epoch}",
+                            ckpt_keys=["last"],
+                            test_partitions=CFG.test_partitions)
 
     return CFG.gLogPath
 
 
 
+
 def simple_test(saved_logpath,
                 epochs_ran=None, folder_suffix="",
-                test_best=True):
+                ckpt_keys:list = ["last"],
+                test_partitions = CFG.test_partitions):
 
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
@@ -356,8 +371,10 @@ def simple_test(saved_logpath,
     model = model.to(gpu_device)
 
     pth_list = {}
-    pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"model"]
-    if test_best: pth_list["best"] = torch.load(saved_logpath+f"/weights/bestmodel.pth")
+    if "last" in ckpt_keys:
+        pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"]
+    if "best" in ckpt_keys:
+        pth_list["best"] = torch.load(saved_logpath+f"/weights/best_{m}.pth")
 
 
     ### MODEL TESTING
@@ -366,7 +383,7 @@ def simple_test(saved_logpath,
         lutl.LOG2TXT(f"Testing Weight Loaded...{CFG.featx_pretrain},{str(ret_msg)}; {p_k}--{saved_logpath} ",
                         dir_to_save +'/misc.txt')
 
-        test_center_num = CFG.test_partitions if CFG.test_partitions>1 else 0
+        test_center_num = test_partitions if test_partitions>1 else 0
         for c in ["all"]+ list(range(test_center_num)):
             testloader = getDataLoaders(CFG, center_index=c, type="test")
             testMetric = MultiClassMetrics(dir_to_save+f"/metrics/{p_k}-test")
@@ -387,6 +404,7 @@ def simple_test(saved_logpath,
                         test_center = c,
                         epochs_ran  = epochs_ran,
                         timetaken   = int(time.time() - start_time),
+                        ctime       = time.ctime(),
                         testf1scr   = testMetric.get_f1score(),
                         testbalacc  = testMetric.get_balanced_accuracy(),
                         testacc     = testMetric.get_accuracy(),
