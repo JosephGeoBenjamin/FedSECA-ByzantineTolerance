@@ -80,6 +80,9 @@ parser = argparse.ArgumentParser(description='Classification task')
 parser.add_argument('--load-json', type=str, metavar='JSON',
     help='Load settings from file in json format which override values hard codes in py file.')
 
+parser.add_argument('--seed', type=int, metavar='Int',
+    help='Seed to be set for training')
+
 parser.add_argument('--featx-pretrain', type=str, metavar='PATH',
     help='Set from where to load the prestrained weight from')
 
@@ -408,6 +411,7 @@ class ClsFedHandler(object):
 def simple_main(model_key=None, folder_suffix=""):
 
     ### SETUP
+    print("SEED:", CFG.seed)
     rutl.START_SEED(CFG.seed)
     gpuid_generator = fedutl.gpu_devices_generator()
 
@@ -699,6 +703,7 @@ def simple_test(saved_logpath, model_list:list=["global_model"],
                             test_center = c,
                             epochs_ran  = epochs_ran,
                             timetaken   = int(time.time() - start_time),
+                            seed        = CFG.seed,
                             ctime       = time.ctime(),
                             testf1scr   = testMetric.get_f1score(),
                             testbalacc  = testMetric.get_balanced_accuracy(),

@@ -273,11 +273,10 @@ class NoGuardΞByzantineDecopl():
 
 ##==============================================================================
 
-## TODO: fix model state reading directly
-
 class KrumΞByzantine(NoGuardΞByzantine):
     """
-    Work: https://papers.nips.cc/paper_files/paper/2017/hash/f4b9ec30ad9f68f89b29639786cb62ef-Abstract.html
+    reference: Machine Learning with Adversaries: Byzantine Tolerant Gradient Descent
+    Paper: https://papers.nips.cc/paper_files/paper/2017/hash/f4b9ec30ad9f68f89b29639786cb62ef-Abstract.html
 
     """
     def __init__(self, cfg, id, model, device="cpu"):
@@ -291,14 +290,14 @@ class KrumΞByzantine(NoGuardΞByzantine):
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
 
         self.aggregator_func = self.__krum_aggregation
-        self.krum_m  = int(self.defense_cfg["multikrum_m"]) # M
-        self.num_byz_b  = self.defense_cfg["num_assumed_byz"] # B; should hold 2b+2 < n
+        self.krum_m  = int(self.defense_cfg["multikrum_m"]) # M ; number top clients to be used in averaging setup
+        self.num_byz_b  = self.defense_cfg["num_assumed_byz"] # B; should hold 2b+1 <= n
 
-        self.vec_state_ignore = ["num_batches_tracked"]
-        if not ( (2*self.num_byz_b+2) < self.num_client_k):
-            print(f"WARNING!!!..... `2b+2 < n` doesn't hold, 2*{self.num_byz_b}+2 < {self.num_client_k} ")
+        if not ( (2*self.num_byz_b+1) <= self.num_client_k):
+            print(f"WARNING!!!..... `2b+1 <= n` doesn't hold, 2*{self.num_byz_b}+1 <= {self.num_client_k} ")
         print("Defense: Krum")
 
 
@@ -306,23 +305,24 @@ class KrumΞByzantine(NoGuardΞByzantine):
             self._init_byzantiness()
 
 
-
     #-------- Server methods ----------
 
     def __krum_aggregation(self, lsets):
+        K = len(lsets) # num_client_k
+
         fully_wvecs = [fedops.get_param_from_state(l["model_state"])
                     for l in lsets]
-
         wvecs = [fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
-        num_neigbour = self.num_client_k - self.num_byz_b - 2
+
+        num_neigbour = K - self.num_byz_b - 2 # assumed non malicious neighbours
 
         all_dist = []
         for v in wvecs:
-            all_dist.append(torch.norm(stacked_wvec-v, dim=1))
+            all_dist.append(torch.norm(stacked_wvec-v, dim=1).view(K,1))
 
         neighbor_dist_sum = []
         for dist in all_dist:
@@ -338,7 +338,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
             final_wvec +=fully_wvecs[mi]
         final_wvec /= len(midxs)
 
-        agg_state = fedops.set_param_in_state(lsets[0]["model"].state_dict(), final_wvec)
+        agg_state = fedops.set_param_in_state(lsets[0]["model_state"], final_wvec)
 
 
         info_dict = {"client_weightage": [ 1/len(midxs) if i in midxs else 0
@@ -349,11 +349,91 @@ class KrumΞByzantine(NoGuardΞByzantine):
 
 ##------------------------------------------------------------------------------
 
+class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
+    """
+    reference: Dong Yin, et al. Byzantine-Robust Distributed Learning: Towards Optimal Statistical Rates
+    Paper: https://proceedings.mlr.press/v80/yin18a.html
+
+    Approaches: trimmedmean, median,
+    """
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.approach = self.defense_cfg["approach"]
+        self.aggregator_func = self.__coordinatewise_aggregation
+
+        # number of byzzantines to ignore
+        self.cwtm_beta    = self.defense_cfg["cwtm_beta"] #B; should hold K-2B > 0
+
+        if self.num_client_k < (2 * self.cwtm_beta):
+            raise Exception(f"Beta set is greater for given client count, 2*{self.cwtm_beta}>{self.num_client_k}")
+
+        print(f"Defense: CoordinateWise {self.approach}")
+
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+
+    #-------- Server methods ----------
+
+    def __coordinatewise_aggregation(self, lsets):
+        """
+        codes:
+        https://github.com/moranant/attacking_distributed_learning/blob/master/defences.py
+        https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/aggregator
+        """
+        K = len(lsets) # num_client_k
+
+        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+                    for l in lsets]
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        median_wvec, _ = torch.median(stacked_wvec, dim=0)
+
+        if self.approach == "median":
+            final_wvec = median_wvec
+
+        elif self.approach == "trimmedmean":
+
+            # median_wvec = torch.tensor(0.0) ## to disable median centring
+            beta = self.cwtm_beta
+            delta_wvec = stacked_wvec-median_wvec
+            sorted_dwvec, _ = torch.sort(delta_wvec, dim=0)
+            good_wvec = (sorted_dwvec[beta:][:])[:-beta][:]
+            final_wvec = good_wvec.mean(dim=0) + median_wvec
+
+        else: raise Exception(f"unknown method {self.approach}")
+
+        agg_state = fedops.set_param_in_state(lsets[0]["model_state"],
+                                final_wvec, keys_to_ignore=self.vec_state_ignore)
+
+        info_dict = {"client_weightage": ["CW can't have this"]
+                    }
+        return agg_state, info_dict
+
+
+##------------------------------------------------------------------------------
+
 from pyod.models.copod import COPOD
 
 class CopodDosΞByzantine(NoGuardΞByzantine):
     """
-    Work: https://arxiv.org/abs/2207.10804
+    reference: Suppressing Poisoning Attacks on Federated Learning for Medical Imaging
+    paper: https://arxiv.org/abs/2207.10804
     """
 
     def __init__(self, cfg, id, model, device="cpu"):
@@ -367,12 +447,11 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
 
         self.aggregator_func = self.__dos_aggregation
         self.cpd_l2 = COPOD()
         self.cpd_cs = COPOD()
-
-        self.vec_state_ignore = ["num_batches_tracked"]
 
         print("Defense: Copod-DOS")
 
