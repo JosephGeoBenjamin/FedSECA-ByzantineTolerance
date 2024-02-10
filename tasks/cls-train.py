@@ -333,7 +333,7 @@ def simple_main(model_key=None, center_index=None, folder_suffix=""):
         if CFG.test_trend_full:
             simple_test(CFG.gLogPath, epochs_ran=epoch,
                 folder_suffix="", ## defaults to original folder
-                ckpt_keys=["start"],
+                ckpt_keys=["last"],
                 test_partitions=0)
 
         ## Test Last N epochs for non fluctuating results
@@ -372,9 +372,9 @@ def simple_test(saved_logpath,
 
     pth_list = {}
     if "last" in ckpt_keys:
-        pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"{m}"]
+        pth_list["last"] = torch.load(saved_logpath+"/weights/checkpoint.pth")[f"model"]
     if "best" in ckpt_keys:
-        pth_list["best"] = torch.load(saved_logpath+f"/weights/best_{m}.pth")
+        pth_list["best"] = torch.load(saved_logpath+f"/weights/bestmodel.pth")
 
 
     ### MODEL TESTING
@@ -425,7 +425,7 @@ if __name__ == '__main__':
     def runner(c="all", m=None, t=""):
         logpth = simple_main(center_index=c, model_key=m,
                     folder_suffix=t)
-        simple_test(logpth)
+        # simple_test(logpth)
 
     ##-----------------------
 

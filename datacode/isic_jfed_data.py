@@ -23,12 +23,12 @@ class Isic2019_JFedDataset(torch.utils.data.Dataset):
         self, data_path: str = None, #path to dataset images
         csv_name = None, # for some special data partitioning
         center = "all",  # all--> Pooled
-        split_type: str = "ssl_train", # cls_train / cls_valid / test
+        split_type: str = "cls_train", # cls_train / cls_valid / test / cls_train+valid
         transforms=None,
     ):
 
         # cls_csv = csv_name if csv_name else "isic_clsfy_data.csv"
-        cls_csv = csv_name if csv_name else "isic_Full_Train_data.csv"
+        cls_csv = csv_name if csv_name else  "isic_train_data.csv"
         ssl_csv = csv_name if csv_name else  "isic_ssl_data.csv"
         test_csv = csv_name if csv_name else "isic_test_data.csv"
 
@@ -41,17 +41,17 @@ class Isic2019_JFedDataset(torch.utils.data.Dataset):
 
         if split_type == "ssl_train":
             df2 = pd.read_csv(os.path.join(data_path, ssl_csv))
+
         elif split_type == "cls_train":
             df2 = pd.read_csv(os.path.join(data_path, cls_csv))
             df2 = df2[df2["fold"] == "train"]
         elif split_type == "cls_valid":
             df2 = pd.read_csv(os.path.join(data_path, cls_csv))
             df2 = df2[df2["fold"] == "valid"]
+
         elif split_type == "test":
             df2 = pd.read_csv(os.path.join(data_path, test_csv))
         else: raise("Unknown Split type specified ....", split_type)
-
-
 
         self.center = center
         self.pooled = True if center == "all" else False

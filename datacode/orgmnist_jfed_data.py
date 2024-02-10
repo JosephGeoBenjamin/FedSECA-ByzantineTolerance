@@ -24,18 +24,18 @@ class OrganMnist_JFedDataset(torch.utils.data.Dataset):
         self, data_path: str = None, #path to dataset images
         csv_name = None, # for some special data partitioning
         center = "all",  # all--> Pooled
-        split_type: str = "ssl_train", # cls_train / cls_valid / test
+        split_type: str = "cls_train", # cls_train / cls_valid / test
         label_type = "target", # target -> 11 class; target_grouped -> 7 classes
         transforms=None,
     ):
 
         # cls_csv = csv_name if csv_name else  "organmnist_clsfy_data.csv"
-        # cls_csv = csv_name if csv_name else  "organmnist_Full_Train_data.csv"
-        ssl_csv = csv_name if csv_name else  "organmnist_ssl_data.csv"
+        # ssl_csv = csv_name if csv_name else  "organmnist_ssl_data.csv"
         # test_csv = csv_name if csv_name else "organmnist_test_data.csv"
-        total_centers = 3 # ACS
+        # total_centers = 3 # ACS
 
-        cls_csv = csv_name if csv_name else  "organmnist_Full_TrainV2_data.csv"
+        cls_csv = csv_name if csv_name else  "organmnist_trainV2_data.csv"
+        ssl_csv = csv_name if csv_name else  "organmnist_ssl_data.csv"
         test_csv = csv_name if csv_name else "organmnist_testV2_data.csv"
         total_centers = 6 #A/2, C/2, S/2
 
