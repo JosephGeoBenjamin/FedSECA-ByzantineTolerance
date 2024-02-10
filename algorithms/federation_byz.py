@@ -138,6 +138,7 @@ class NoGuardΞByzantine():
     #-------- Server methods ----------
 
     def __plain_fedavg(self, lsets):
+        ## Regular
         local_states = []
         for ls in lsets:
             local_states.append(ls["model_state"])
@@ -180,6 +181,7 @@ class NoGuardΞByzantineDecopl():
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None decouple")
@@ -244,11 +246,23 @@ class NoGuardΞByzantineDecopl():
     #-------- Server methods ----------
 
     def __plain_fedavg(self, lsets):
-        local_states = []
-        for ls in lsets:
-            local_states.append(ls["model_state"])
+        ## Regular
+        # local_states = []
+        # for ls in lsets:
+        #     local_states.append(ls["model_state"])
+        # agg_states = fedops.global_average_statedict(local_states)
 
-        agg_states = fedops.global_average_statedict(local_states)
+
+        ##Vectorized
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        agg_states = fedops.set_param_in_state(state_dict_struct, stacked_wvec.mean(dim=0),
+                                              keys_to_ignore=self.vec_state_ignore)
+
 
         agg_states_cli = { f"client_{i}": copy.deepcopy(agg_states)
                           for i in range(len(lsets))}
@@ -308,15 +322,15 @@ class KrumΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __krum_aggregation(self, lsets):
-        K = len(lsets) # num_client_k
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        #             for l in lsets]
 
-        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
-                    for l in lsets]
         wvecs = [fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
-
+        K = len(lsets) # num_client_k
 
         num_neigbour = K - self.num_byz_b - 2 # assumed non malicious neighbours
 
@@ -333,13 +347,13 @@ class KrumΞByzantine(NoGuardΞByzantine):
         mvals, midxs = torch.topk(torch.hstack(neighbor_dist_sum),
                                   k=self.krum_m, largest=False)
 
-        final_wvec = torch.zeros_like(fully_wvecs[0])
+        final_wvec = torch.zeros_like(wvecs[0])
         for mi in midxs.tolist():
-            final_wvec +=fully_wvecs[mi]
+            final_wvec +=wvecs[mi]
         final_wvec /= len(midxs)
 
-        agg_state = fedops.set_param_in_state(lsets[0]["model_state"], final_wvec)
-
+        agg_state = fedops.set_param_in_state(state_dict_struct, final_wvec,
+                                              keys_to_ignore=self.vec_state_ignore)
 
         info_dict = {"client_weightage": [ 1/len(midxs) if i in midxs else 0
                                         for i in range(len(lsets))]
@@ -393,14 +407,16 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
         https://github.com/moranant/attacking_distributed_learning/blob/master/defences.py
         https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/aggregator
         """
-        K = len(lsets) # num_client_k
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
 
-        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
-                    for l in lsets]
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        #             for l in lsets]
+
         wvecs = [fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
+        K = len(lsets) # num_client_k
 
         median_wvec, _ = torch.median(stacked_wvec, dim=0)
 
@@ -418,7 +434,7 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
 
         else: raise Exception(f"unknown method {self.approach}")
 
-        agg_state = fedops.set_param_in_state(lsets[0]["model_state"],
+        agg_state = fedops.set_param_in_state(state_dict_struct,
                                 final_wvec, keys_to_ignore=self.vec_state_ignore)
 
         info_dict = {"client_weightage": ["CW can't have this"]
@@ -463,9 +479,10 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
     #-------- Server methods ----------
 
     def __dos_aggregation(self, lsets):
-        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
-                    for l in lsets]
-        sfully_wvec = torch.vstack(fully_wvecs)
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        #             for l in lsets]
+        # sfully_wvec = torch.vstack(fully_wvecs)
 
         wvecs = [fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore = self.vec_state_ignore)
@@ -489,11 +506,12 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         abnorm_score = torch.tensor(abnorm_score).view(-1, 1)
 
         cweigh = torch_F.softmax(-1*abnorm_score,dim=0)
-        cweighed_wvec = cweigh.to(self.device) * sfully_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
 
         final_wvec = torch.sum(cweighed_wvec, axis = 0)
 
-        agg_state = fedops.set_param_in_state(lsets[0]["model_state"], final_wvec)
+        agg_state = fedops.set_param_in_state(state_dict_struct, final_wvec,
+                                              keys_to_ignore=self.vec_state_ignore)
 
         info_dict = {"client_weightage":cweigh.flatten().tolist()}
         return agg_state, info_dict
@@ -518,6 +536,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
 
         self.aggregator_func = self.__dataweightage_aggregation_decopld
 
@@ -627,22 +646,30 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     #-------- Server methods ----------
 
     def __dataweightage_aggregation_decopld(self, lsets):
-        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        #             for l in lsets]
+        # sfully_wvec = torch.vstack(fully_wvecs)
+
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
                     for l in lsets]
-        sfully_wvec = torch.vstack(fully_wvecs)
-        out_ref_wvec = torch.zeros_like(sfully_wvec)
+        stacked_wvec = torch.vstack(wvecs)
+
+        out_ref_wvec = torch.zeros_like(stacked_wvec)
 
         agg_states_cli = {}
-        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         for i in range(len(lsets)):
             cweigh = self.client_weightage[i,:].view(-1, 1)
-            cweighed_wvec = cweigh.to(self.device) * sfully_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
             cli_wvec = torch.sum(cweighed_wvec, axis = 0)
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
             out_ref_wvec[i, :] = cli_wvec
 
-        agg_states = fedops.set_param_in_state(state_dict_struct, out_ref_wvec.mean(dim=0))
+        agg_states = fedops.set_param_in_state(state_dict_struct, out_ref_wvec.mean(dim=0),
+                                               keys_to_ignore=self.vec_state_ignore)
         agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
 
         info_dict = {"client_weightage":self.client_weightage.tolist()}
@@ -665,6 +692,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
 
         self.aggregator_func = self.__dynamic_Tau_Theta_Lambda_aggr_decopld
 
@@ -693,8 +721,8 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.wvec_init = wvec
         self.aggwvec_tminus1 = torch.vstack( [wvec]*self.num_client_k )
         self.wvec_tminus1    = self.aggwvec_tminus1.clone()
-        fully_wvec =  fedops.get_param_from_state(self.gmodel_init.state_dict())
-        self.fully_aggwvec_tminus1 = torch.vstack( [fully_wvec]*self.num_client_k )
+        # fully_wvec =  fedops.get_param_from_state(self.gmodel_init.state_dict())
+        # self.fully_aggwvec_tminus1 = torch.vstack( [fully_wvec]*self.num_client_k )
 
 
     def _get_constant_tau(self, data_dist):
@@ -737,11 +765,11 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
 
         #for fedavging with bn_batches_tracked; thanks to Pytorch default models for complicating life
-        fully_wvecs = [fedops.get_param_from_state(l["model_state"])
-                    for l in lsets]
-        sfully_wvec = torch.vstack(fully_wvecs)
-        outfully_aggwvec = torch.zeros_like(sfully_wvec)
-        sfully_aggwvec_tminus1 = self.fully_aggwvec_tminus1
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        #             for l in lsets]
+        # sfully_wvec = torch.vstack(fully_wvecs)
+        # outfully_aggwvec = torch.zeros_like(sfully_wvec)
+        # sfully_aggwvec_tminus1 = self.fully_aggwvec_tminus1
 
         #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
@@ -781,31 +809,28 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             # print("Scale Shape", scale_sec.shape)
 
             ## start core
-            clipped_fully_deltawvec = scale_sec * (sfully_wvec - sfully_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            clipped_fully_aggdeltawvec = \
-                torch.sum(clipped_fully_deltawvec, axis = 0) / torch.sum(scale_sec)
+            clipped_deltawvec = scale_sec * (stacked_wvec - stacked_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_aggdeltawvec = \
+                torch.sum(clipped_deltawvec, axis = 0) / torch.sum(scale_sec)
 
-            cli_fully_wvec = sfully_aggwvec_tminus1[i] + clipped_fully_aggdeltawvec
-            outfully_aggwvec[i, :] = cli_fully_wvec
+            client_wvec = stacked_aggwvec_tminus1[i] + clipped_aggdeltawvec
+            outref_aggwvec[i, :] = client_wvec
 
             sector_scales.append(scale_sec.flatten().tolist())
             rad_scales.append(rad_comp.flatten().tolist())
             cos_scales.append(cos_comp.flatten().tolist())
 
-            agg_states = fedops.set_param_in_state(state_dict_struct, cli_fully_wvec)
+            agg_states = fedops.set_param_in_state(state_dict_struct, client_wvec,
+                                            keys_to_ignore=self.vec_state_ignore)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
             ## end core
 
-            outref_aggwvec[i, :] = fedops.get_param_from_state(agg_states,
-                                        keys_to_ignore=self.vec_state_ignore)
-
-
-        agg_states = fedops.set_param_in_state(state_dict_struct, outfully_aggwvec.mean(dim=0))
+        agg_states = fedops.set_param_in_state(state_dict_struct, outref_aggwvec.mean(dim=0),
+                                               keys_to_ignore=self.vec_state_ignore)
         agg_states_cli.update({"client_G": copy.deepcopy(agg_states)})
 
         self.wvec_tminus1    = stacked_wvec.clone()
         self.aggwvec_tminus1 = outref_aggwvec.clone()
-        self.fully_aggwvec_tminus1 = outfully_aggwvec.clone()
 
         info_dict = {"client_clip_weightage":sector_scales,
                      "radius_component": rad_scales,
