@@ -51,8 +51,8 @@ enable_scheduler = True,
 enable_weight_reinit = True, # FedAvg protocol, true in general cases
 fed_approach = "fedavg",
 
-enable_fedprox = False,
-fedprox_mu     = 0.5,
+enable_proxreg = False,
+proxreg_mu     = 0.5,
 
 reg_method   = "NONE",
 reg_coeff    = 0.0,
@@ -247,12 +247,12 @@ class ClsFedHandler(object):
         self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.loc_val_best = 0.0
 
-        ##unused
-        self.step_loader = iter(trainloader)
-        self.local_optim = None
+        self.step_loader  = iter(trainloader)
+        self.local_optim  = None
         self.local_scaler = None
         self.local_model  = None # copy undergoing training
         self.gdsyp_model  = None # copy of model received fomr server
+        self.winit_model  = None # copy of starting seed Model
         self.agghatch     = None
 
     def train_one_epoch(self, epoch):
@@ -263,8 +263,8 @@ class ClsFedHandler(object):
         scaler    = self.local_scaler
         return_result = {}
 
-        if CFG.enable_fedprox:
-            global_model_prox = copy.deepcopy(model)
+        if CFG.enable_proxreg:
+            model_prox = copy.deepcopy(self.winit_model)
 
         startValidMetric = self.run_validation(model)
         ### --------------
@@ -290,11 +290,14 @@ class ClsFedHandler(object):
             pred, featp = model.forward(img)
             loss, loss_info = self.lossfunc(pred, tgt, featp, self.agghatch)
 
-            if CFG.enable_fedprox:
-                proximal_term = 0.0
-                for w, w_t in zip(model.parameters(), global_model_prox.parameters()):
-                    proximal_term += (w - w_t).norm(2)
-                loss = loss+ (CFG.fedprox_mu / 2) * proximal_term
+            if CFG.enable_proxreg:
+                proximal_l2 = 0.0
+                for w, w_t in zip(model.parameters(), model_prox.parameters()):
+                    proximal_l2 += (w - w_t).norm(2).square()
+                loss = loss + (CFG.proxreg_mu / 2) * proximal_l2
+
+                loss_info["PROX_l2"] = ((CFG.proxreg_mu / 2) * proximal_l2).item()
+                loss_info["PROX_cos"] = 0
 
             loss.backward()
             optimizer.step()
@@ -341,7 +344,7 @@ class ClsFedHandler(object):
 
 
         if ANALYSE_MODELS:
-            model_start = self.gdsyp_model
+            model_start = self.winit_model
             curr_mvec = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"])
             strt_mvec = fedops.get_param_from_state(model_start.state_dict(), keys_to_ignore=["num_batches_tracked"])
             model_diff_vec = curr_mvec - strt_mvec
@@ -383,6 +386,8 @@ class ClsFedHandler(object):
     def update_parameters(self, model, agghatch=None):
         self.local_model = copy.deepcopy(model).to(self.device)
         self.gdsyp_model = copy.deepcopy(model).to(self.device).eval()
+        if not self.winit_model: self.winit_model = copy.deepcopy(model).to(self.device).eval()
+
         self.local_optim = optim.AdamW(self.local_model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)
         self.local_scaler = torch.cuda.amp.GradScaler() # for mixed precision
