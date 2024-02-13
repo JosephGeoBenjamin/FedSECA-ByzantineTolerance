@@ -10,6 +10,14 @@
     "byztn_clients": [],
     "byztn_method" : "NaifttCraftedζAttack",
     "lambda":0.1
+    },
+
+    {
+    "byztn_clients": [],
+    "byztn_method" : "OzfaturaROPζAttack",
+    "pi_angle": 90 ,
+    "rho_reloc": 1 ,
+    "lambda_refwt": 0.9
     }
 
 ],
