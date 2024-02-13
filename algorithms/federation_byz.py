@@ -11,6 +11,8 @@ import pyod
 import algorithms.federation_ops as fedops
 import algorithms.byzantine_attacks as byz_attacks
 
+from utilities.logUtils import LOG2CSV
+
 """
 gmodel_init -> model recieved init communication i.e at very first broadcast of params for training
 gmodel_tminus1 -> model recieved at (T-1)th aggregation round from Server
@@ -718,7 +720,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
     def init_stacked_wvecs(self):
         wvec = fedops.get_param_from_state(self.gmodel_init.state_dict(),
                         keys_to_ignore=self.vec_state_ignore)
-        self.wvec_init = wvec
+        self.wvec_init = wvec.clone()
         self.aggwvec_tminus1 = torch.vstack( [wvec]*self.num_client_k )
         self.wvec_tminus1    = self.aggwvec_tminus1.clone()
         # fully_wvec =  fedops.get_param_from_state(self.gmodel_init.state_dict())
@@ -745,7 +747,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         lambda_dist = torch.div(data_dist, own_dist.view(-1, 1))
         lambda_dist = 1 + torch.abs(1 - lambda_dist)
 
-        return lambda_dist
+        return lambda_dist.to(torch.float)
 
 
     #-------- Server methods ----------
@@ -782,27 +784,32 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         stacked_aggwvec_tminus1 = self.aggwvec_tminus1
 
         ##
-        agg_states_cli = {}
-        lmbda_dist = self.client_clip_factor.to(self.device)
-
         print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
+        ## Lambda Computes
+        lmbda_dist = self.client_clip_factor.to(self.device)
         ## Tau Computes
-        tau_rad = torch.norm(self.wvec_init - stacked_wvec, dim=1).view(-1, 1)    #---> [5]
+        tau_rad = torch.norm(stacked_aggwvec_tminus1 - stacked_wvec, dim=1).view(-1, 1)
         ## Theta Computes
-        cos_theta = torch_F.cosine_similarity(self.wvec_init, stacked_wvec, dim=1).view(-1, 1)
+        theta_angs = torch.acos(torch_F.cosine_similarity(
+                        stacked_aggwvec_tminus1, stacked_wvec, dim=1).view(-1, 1))
 
+        agg_states_cli = {}
         sector_scales = []; rad_scales = []; cos_scales = []
         for i in range(stacked_wvec.shape[0]):
             taui = tau_rad[i]
-            ccden = torch.norm(stacked_wvec - stacked_wvec[i], dim=1).view(-1,1)
+            ccden = torch.norm(stacked_wvec[i] - stacked_wvec, dim=1).view(-1,1)
             taui_by_ccden = self.safe_divide(taui, ccden)
             rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
 
-            thetai = cos_theta[i]
-            cosbas = torch_F.cosine_similarity(stacked_wvec, stacked_wvec[i], dim=1).view(-1,1)
-            cosbas_x_thetai = thetai*100*(cosbas-thetai)
-            cos_comp = torch_F.sigmoid(cosbas_x_thetai)
+            costhetai = torch.cos(theta_angs[i])
+            cosbase = torch_F.cosine_similarity(stacked_wvec[i], stacked_wvec, dim=1).view(-1,1)
+            cosbase_x_thetai = costhetai*100*(cosbase-costhetai)
+            cos_comp = 2*torch_F.sigmoid(cosbase_x_thetai)
+
+            LOG2CSV(["At", i , theta_angs[i], costhetai, cosbase.flatten().tolist(),
+                    cos_comp.flatten().tolist(), rad_comp.flatten().tolist(),],
+                    "/home/joseph.benjamin/WERK/fed-cvpr/fed-sketch/hypotheses/-debug/DEBUG.txt")
 
             scale_sec = rad_comp * cos_comp #* lmbda_dist[i].view(-1,1)
             scale_sec = torch.clamp(scale_sec, max=1, min=0)
