@@ -691,6 +691,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
+        self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
@@ -710,7 +711,6 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             self.init_stacked_wvecs()
 
         print("Defense: Decoupled Clipping Tau-SKHD")
-
 
         if len(self.byztn_cfg) != 0:
             self._init_byzantiness()
@@ -738,14 +738,17 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         data_dist = (data_dist + data_dist.T) / 2
         data_dist = torch.tensor(data_dist)
         K = data_dist.shape[0] #clients
+        D = self.featx_d
 
         # rmean_dist = torch.sum(data_dist, dim=0) / K
         # all_dist = data_dist + (rmean_dist * torch.eye(K, dtype=float).to_dense())
 
-        own_dist = torch.diag(data_dist)
+        # own_dist = torch.diag(data_dist)
 
-        lambda_dist = torch.div(data_dist, own_dist.view(-1, 1))
-        lambda_dist = 1 + torch.abs(1 - lambda_dist)
+        lambda_dist = torch.div(data_dist, D) # scale the distance
+        lambda_dist = 1 + torch.abs(1 - lambda_dist) # mirror the deviation
+
+        lambda_dist = lambda_dist * (1 - torch.eye(K, K)) # make diagonal zeros
 
         return lambda_dist.to(torch.float)
 
@@ -784,7 +787,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         stacked_aggwvec_tminus1 = self.aggwvec_tminus1
 
         ##
-        print(torch.norm(stacked_wvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
+        print(torch.norm(stacked_aggwvec_tminus1 - stacked_wvec[0], dim=1).view(-1, 1))
 
         ## Lambda Computes
         lmbda_dist = self.client_clip_factor.to(self.device)
@@ -797,19 +800,16 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         agg_states_cli = {}
         sector_scales = []; rad_scales = []; cos_scales = []
         for i in range(stacked_wvec.shape[0]):
-            taui = tau_rad[i]
+            taui = (tau_rad[i]* lmbda_dist[i]).view(-1, 1)
             ccden = torch.norm(stacked_wvec[i] - stacked_wvec, dim=1).view(-1,1)
             taui_by_ccden = self.safe_divide(taui, ccden)
             rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
 
-            costhetai = torch.cos(theta_angs[i])
+            costhetai = torch.cos(theta_angs[i])#Strict #* lmbda_dist[i]).view(-1, 1)
             cosbase = torch_F.cosine_similarity(stacked_wvec[i], stacked_wvec, dim=1).view(-1,1)
             cosbase_x_thetai = costhetai*100*(cosbase-costhetai)
-            cos_comp = 2*torch_F.sigmoid(cosbase_x_thetai)
+            cos_comp = torch.clamp(2*torch_F.sigmoid(cosbase_x_thetai), min=0.0, max=1.0)
 
-            LOG2CSV(["At", i , theta_angs[i], costhetai, cosbase.flatten().tolist(),
-                    cos_comp.flatten().tolist(), rad_comp.flatten().tolist(),],
-                    "/home/joseph.benjamin/WERK/fed-cvpr/fed-sketch/hypotheses/-debug/DEBUG.txt")
 
             scale_sec = rad_comp * cos_comp #* lmbda_dist[i].view(-1,1)
             scale_sec = torch.clamp(scale_sec, max=1, min=0)
