@@ -105,7 +105,8 @@ class NoGuardΞByzantine():
 
         if self.byz_way:
             out_state = self.byz_way.modify(model.state_dict(),
-                                            self.gmodel_tminus1.state_dict())
+                                            self.gmodel_tminus1.state_dict(),
+                                            omniscience=zxs["omniscience"])
         else:
             out_state = model.state_dict()
 
@@ -214,13 +215,16 @@ class NoGuardΞByzantineDecopl():
     # @instancemethod #Locals calculation to send to Global
     def synopsize_local(self, zxs): #used at end of local round at each client
         """ zxs: {"model", }
+        Param Compression / Differential privacy or any other param modifications
+        are to be carried out here
         """
         lset = {}
         model = fedops.model_copier(zxs["model"]) #after a local-rounds set
 
         if self.byz_way:
             out_state = self.byz_way.modify(model.state_dict(),
-                                            self.gmodel_tminus1.state_dict())
+                                            self.gmodel_tminus1.state_dict(),
+                                            omniscience=zxs["omniscience"])
         else:
             out_state = model.state_dict()
 
@@ -234,6 +238,7 @@ class NoGuardΞByzantineDecopl():
     def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
         """ model_struct: torch nn.module object
             gset: global aggregations {"model", }
+        Decompression / local personalization of global model here
         """
         model_struct = self.gmodel_init if not model_struct else model_struct
         if not device: device = next(model_struct.parameters()).device

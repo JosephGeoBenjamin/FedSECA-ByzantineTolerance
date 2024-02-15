@@ -264,7 +264,7 @@ class ClsFedHandler(object):
         return_result = {}
 
         if CFG.enable_proxreg:
-            model_prox = copy.deepcopy(self.winit_model)
+            model_prox = copy.deepcopy(self.winit_model) ## --> change to
 
         startValidMetric = self.run_validation(model)
         ### --------------
@@ -499,10 +499,8 @@ def simple_main(model_key=None, folder_suffix=""):
     for itr in range(start_itrs, total_itrs):
 
         ## ------ Training Routine ------
-        local_clues_for_fed = []
-        if ANALYSE_MODELS: local_info_for_ansys = []
-
-        # global_model.train()
+        local_xcerpt_for_fed = []
+        local_train_returns = {}
 
         for id in  traindozers.keys():
             lmodel, agghatch = fed_locals[id].fedprtcl.desynopsize_local(global_aggset)
@@ -518,10 +516,16 @@ def simple_main(model_key=None, folder_suffix=""):
                 lret = fed_locals[id].train_one_epoch(epoch = itr)
             else: raise Exception("Unknown Update Mode set")
 
-            local_clues_for_fed.append(fed_locals[id].fedprtcl.synopsize_local(lret))
-            if ANALYSE_MODELS: local_info_for_ansys.append(lret)
+            local_train_returns[id] = lret #this was synopsize back then
 
-        global_aggset = global_fedprtcl.aggregate_globally(local_clues_for_fed, device=g_device)
+        # modified synopsis for Omniscient attack
+        for id in  traindozers.keys():
+            syn_in = local_train_returns[id]
+            syn_in["omniscience"] = local_train_returns
+            local_xcerpt_for_fed.append(
+                fed_locals[id].fedprtcl.synopsize_local(syn_in)  )
+
+        global_aggset = global_fedprtcl.aggregate_globally(local_xcerpt_for_fed, device=g_device)
 
         ## caching to global_object for analysis
         global_model_tminus1 = copy.deepcopy(global_model)
@@ -534,14 +538,14 @@ def simple_main(model_key=None, folder_suffix=""):
             diff_l2_norm = []
             diff_cos_sim = []
             winit_cos_sim = []
-            for info1 in local_info_for_ansys:
+            for _, info1 in local_train_returns.items():
                 cosim  = []
                 l2nrm  = []
                 difl2  = []
                 difcos = []
                 v1 = info1["model_vec"].to(g_device)
                 dv1 = info1["model_diff_vec"].to(g_device)
-                for info2 in local_info_for_ansys:
+                for _, info2 in local_train_returns.items():
                     dv2 = info2["model_diff_vec"].to(g_device)
                     v2 = info2["model_vec"].to(g_device)
                     l2nrm.append(torch.norm(v1-v2).item())
