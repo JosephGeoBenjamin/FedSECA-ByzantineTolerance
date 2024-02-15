@@ -49,7 +49,7 @@ class AffineζAttack():
 class FangCraftedζAttack():
     """
     Paper: Local Model Poisoning Attacks to Byzantine-Robust Federated Learning
-    Reference from: https://github.com/Naiftt/SPAFD/
+    code modified: https://github.com/Naiftt/SPAFD/
     """
 
     def __init__(self, cfg, model_at_start, device="cpu"):
@@ -83,7 +83,7 @@ class FangCraftedζAttack():
 
 class ALIEζAttack():
     """
-    Paper: A Little Is Enough: Circumventing Defenses For Distributed Learning
+    Paper: Baruch - A Little Is Enough: Circumventing Defenses For Distributed Learning
     code modified: https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/attacks
     """
 
@@ -110,14 +110,14 @@ class ALIEζAttack():
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
-        # Loop over benign gradients
+        # Loop over benign weights
         benign_wvec_list = []
         for kid in omniscience.keys(): # clientwise train info
             benign_wvec_list.append( fedops.get_param_from_state(
                     omniscience[kid]["model"].state_dict(),
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
-
         benign_wvec = torch.vstack(benign_wvec_list)
+
         mu = torch.mean(benign_wvec, dim=0)
         std = torch.std(benign_wvec, dim=0)
 
@@ -127,6 +127,48 @@ class ALIEζAttack():
                                     keys_to_ignore=self.vec_state_ignore)
         return out_state
 
+
+class XieIPMζAttack():
+    """
+    Paper: Fall of Empires: Breaking Byzantine-tolerant SGD by Inner Product Manipulation
+    code modified: https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/attacks
+    """
+    def __init__(self, cfg, model_at_start, device="cpu"):
+
+        self.device = device
+        self.byz_cfg = cfg.byztn_cfg
+        self.epsilon = self.byz_cfg.get("epsilon")
+
+        self.num_client_k = n = cfg["data_centers_count"]
+        self.num_byzant_b = m = len(self.byz_cfg["byztn_clients"])
+        self.num_honest_g = g = n-m
+
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        ## this is global common start point
+        self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
+                                    keys_to_ignore=self.vec_state_ignore)
+
+
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+
+        # Loop over benign weights
+        benign_wvec_list = []
+        for kid in omniscience.keys(): # clientwise train info
+            benign_wvec_list.append( fedops.get_param_from_state(
+                    omniscience[kid]["model"].state_dict(),
+                    keys_to_ignore=self.vec_state_ignore).to(self.device) )
+        benign_wvec = torch.vstack(benign_wvec_list)
+
+        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1.state_dict(),
+                                    keys_to_ignore=self.vec_state_ignore)
+
+        delta_wvec = benign_wvec - gwvec_tminus1
+        attack_wvec = gwvec_tminus1 - self.epsilon * (torch.mean(delta_wvec, dim=0))
+
+        out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
+                                    keys_to_ignore=self.vec_state_ignore)
+        return out_state
 
 
 class OzfaturaROPζAttack():

@@ -19,6 +19,11 @@
 
     {
     "byztn_clients": [],
+    "byztn_method" : "XieIPMζAttack"
+    },
+
+    {
+    "byztn_clients": [],
     "byztn_method" : "OzfaturaROPζAttack",
     "pi_angle": 90 ,
     "rho_reloc": 1 ,
