@@ -140,11 +140,21 @@ class NoGuardΞByzantine():
     #-------- Server methods ----------
 
     def __plain_fedavg(self, lsets):
-        ## Regular
-        local_states = []
-        for ls in lsets:
-            local_states.append(ls["model_state"])
-        agg_state = fedops.global_average_statedict(local_states, device="cpu")
+        # ## Regular
+        # local_states = []
+        # for ls in lsets:
+        #     local_states.append(ls["model_state"])
+        # agg_state = fedops.global_average_statedict(local_states, device="cpu")
+
+        ## Vectorized
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        agg_state = fedops.set_param_in_state(state_dict_struct, stacked_wvec.mean(dim=0),
+                                              keys_to_ignore=self.vec_state_ignore)
 
         info_dict = {"client_weightage":[1/len(lsets)]*len(lsets)}
         return agg_state, info_dict
@@ -510,7 +520,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         cweigh = torch_F.softmax(-1*abnorm_score,dim=0)
         cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
 
-        final_wvec = torch.sum(cweighed_wvec, axis = 0)
+        final_wvec = torch.sum(cweighed_wvec, dim = 0)
 
         agg_state = fedops.set_param_in_state(state_dict_struct, final_wvec,
                                               keys_to_ignore=self.vec_state_ignore)
@@ -525,7 +535,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
 ## Decoupled weightage based on Sinkhorn distance
 
-class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
+class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 0
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -665,7 +675,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         for i in range(len(lsets)):
             cweigh = self.client_weightage[i,:].view(-1, 1)
             cweighed_wvec = cweigh.to(self.device) * stacked_wvec  # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            cli_wvec = torch.sum(cweighed_wvec, axis = 0)
+            cli_wvec = torch.sum(cweighed_wvec, dim = 0)
             agg_states = fedops.set_param_in_state(state_dict_struct, cli_wvec)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_states)})
             out_ref_wvec[i, :] = cli_wvec
@@ -681,7 +691,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
 ##==============================================================================
 
 
-class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
+class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 1
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -743,9 +753,9 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         # rmean_dist = torch.sum(data_dist, dim=0) / K
         # all_dist = data_dist + (rmean_dist * torch.eye(K, dtype=float).to_dense())
 
-        # own_dist = torch.diag(data_dist)
+        own_dist = torch.diag(data_dist)
 
-        lambda_dist = torch.div(data_dist, D) # scale the distance
+        lambda_dist = torch.div(data_dist, own_dist) # scale the distance
         lambda_dist = 1 + torch.abs(1 - lambda_dist) # mirror the deviation
 
         lambda_dist = lambda_dist * (1 - torch.eye(K, K)) # make diagonal zeros
@@ -802,7 +812,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
         for i in range(stacked_wvec.shape[0]):
             taui = (tau_rad[i]* lmbda_dist[i]).view(-1, 1)
             ccden = torch.norm(stacked_wvec[i] - stacked_wvec, dim=1).view(-1,1)
-            taui_by_ccden = self.safe_divide(taui, ccden)
+            taui_by_ccden = self.safe_divide(taui, ccden, fill=1.0) # this will return 1 for taui by ccdenii
             rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
 
             costhetai = torch.cos(theta_angs[i])#Strict #* lmbda_dist[i]).view(-1, 1)
@@ -818,7 +828,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
             ## start core
             clipped_deltawvec = scale_sec * (stacked_wvec - stacked_aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
             clipped_aggdeltawvec = \
-                torch.sum(clipped_deltawvec, axis = 0) / torch.sum(scale_sec)
+                torch.sum(clipped_deltawvec, dim = 0) / torch.sum(scale_sec)
 
             client_wvec = stacked_aggwvec_tminus1[i] + clipped_aggdeltawvec
             outref_aggwvec[i, :] = client_wvec
@@ -844,3 +854,133 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl):
                      "cosine_component": cos_scales}
 
         return agg_states_cli, info_dict
+
+
+##==============================================================================
+
+class NewTauLambdaΞByzantine(NoGuardΞByzantine): # Attempt 2
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = K = int(cfg.data_centers_count) # K
+        self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.aggregator_func = self.__dynamic_Tau_aggregate
+
+        with h5py.File(self.defense_cfg["datasummary"], 'r') as hdf5_file:
+            data_dist = hdf5_file["dist_matrix"][()]
+            data_dist = data_dist[:K, :K] # ignore all distances row-column
+
+        self.lambda_factor = self._get_lmbda_from_dist(data_dist)
+
+        ##
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+
+        print("Defense: Fellowship of the Ring")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+
+    def init_stacked_wvecs(self, model):
+        wvec = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore)
+        self.wvec_init = wvec.clone()
+        self.aggwvec_tminus1 = wvec.clone()
+
+
+    def _get_constant_tau(self, data_dist):
+        K = data_dist.shape[0]
+        tau_val = 1.0
+        matx = torch.ones((K,K)) * tau_val
+        return matx
+
+
+    def _get_lmbda_from_dist(self, data_dist):
+        data_dist = (data_dist + data_dist.T) / 2
+        data_dist = torch.tensor(data_dist)
+        K = data_dist.shape[0] #clients
+        D = torch.tensor(self.featx_d)
+
+        lambda_dist = torch.div(data_dist, torch.sqrt(D)) # scale the distance
+        lambda_dist = 1 + torch.abs(1 - lambda_dist) # mirror the deviation
+
+        return lambda_dist.to(torch.float)
+
+
+    #-------- Server methods ----------
+
+    def safe_divide(self, nu, de, fill=0.0):
+        res = torch.full_like(de, fill_value=fill)
+        mask = (de != 0.0)
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
+        return res
+
+
+    def __dynamic_Tau_aggregate(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = torch.zeros_like(stacked_wvec)
+
+        aggwvec_tminus1 = self.aggwvec_tminus1
+
+        K = len(lsets)
+
+        ## Lambda Computes
+        lmbd_rel = self.lambda_factor.to(self.device)
+        lmbd_ij = lmbd_rel * (1 - torch.eye(K, K).to(self.device)) # make diagonal zeros since i vs i true distance is zero
+        lmbdorth_ii = torch.diag(lmbd_rel).view(K, 1) # get distance between orthogonal distance
+        lmbd_mat = torch.minimum(lmbdorth_ii, lmbd_ij)
+
+        rad_scales = []; g_deltas = []
+        for i in range(stacked_wvec.shape[0]):
+            ## Tau Computes
+            gdelta = torch.norm(aggwvec_tminus1 - stacked_wvec[i]).view(1) #scalar
+            tauj = lmbd_mat[i].view(-1, 1) * gdelta
+
+            ccden = torch.norm(stacked_wvec - stacked_wvec[i], dim=1).view(-1,1)
+            taui_by_ccden = self.safe_divide(tauj, ccden, fill=0.0) ## fills i by i as zero w.r.t method of interest
+            rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
+
+            ## start core
+            clipped_deltawvec = rad_comp * (stacked_wvec - aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_aggdelta_i = torch.sum(clipped_deltawvec, dim = 0) / (K-1)
+
+            stacked_deltawvec[i, :] = clipped_aggdelta_i
+
+            rad_scales.append(rad_comp.flatten().tolist())
+            g_deltas.append(gdelta.item())
+            ## end core
+
+        out_wvec  = aggwvec_tminus1 + (torch.sum(stacked_deltawvec, dim=0) / K)
+        agg_state = fedops.set_param_in_state(state_dict_struct, out_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus2 = aggwvec_tminus1.clone()
+        self.aggwvec_tminus1 = out_wvec.clone()
+
+        info_dict = {"client_clip_weightage":rad_scales, "g_delta": g_deltas}
+
+        return agg_state, info_dict
