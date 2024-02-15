@@ -66,7 +66,7 @@ class FangCraftedζAttack():
             local_states.append(omniscience[kid]["model"].state_dict())
         benign_state = fedops.global_average_statedict(local_states)
 
-        wvec_benign = fedops.get_param_from_state(benign_state,
+        wvec_benign = fedops.get_param_from_state(copy.deepcopy(benign_state),
                                 keys_to_ignore=self.vec_state_ignore).to(self.device)
 
         gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
@@ -115,16 +115,18 @@ class OzfaturaROPζAttack():
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
-        ## Benign Gradients:-> torch.mean(benign_gradients, 1)
-        # original work uses "mean of the benign gradients", exactness only possible in omniscient case
-        # here we use local model after an epoch following local protocol
-        m_t = fedops.get_param_from_state(copy.deepcopy(lmodel_state_tth),
-                                    keys_to_ignore=self.vec_state_ignore)
+        ## Benign Gradients m_t:
+        local_states = []
+        for kid in omniscience.keys(): # clientwise train info
+            local_states.append(omniscience[kid]["model"].state_dict())
+        benign_state = fedops.global_average_statedict(local_states)
 
-        ## Global reference:-> ud = self.global_momentum.clone()
-        # attacker has only access to global model recieved from Server, assuming they are not omniscient
+        m_t = fedops.get_param_from_state(copy.deepcopy(benign_state),
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+
+        ## Global reference m~(t-1) :-> ud = self.global_momentum.clone()
         m_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
-                                    keys_to_ignore=self.vec_state_ignore)
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
 
         ## reference point, global momentum
@@ -160,4 +162,5 @@ class OzfaturaROPζAttack():
         out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
                                     keys_to_ignore=self.vec_state_ignore)
 
+        self.gwvec_tminus1 = m_tminus1.clone()
         return out_state
