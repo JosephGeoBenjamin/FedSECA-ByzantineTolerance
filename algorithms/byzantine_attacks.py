@@ -19,11 +19,12 @@ Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
 """
 
 class RandomizedζAttack():
-    def __init__(self, cfg, model_at_start ):
+    def __init__(self, cfg, model_at_start, device="cpu" ):
         # self.model_init = copy.deepcopy(model)
+        self.device = device
         self.byz_cfg = cfg.byztn_cfg
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1):
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)
         weight_vec[:] = torch.rand(len(weight_vec))
         out_state = fedops.set_param_in_state(lmodel_state_tth, weight_vec)
@@ -32,11 +33,12 @@ class RandomizedζAttack():
 
 
 class AffineζAttack():
-    def __init__(self, cfg, model_at_start):
+    def __init__(self, cfg, model_at_start,  device="cpu"):
+        self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.scaler = cfg.byztn_cfg["scale"]
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1):
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)
         weight_vec[:]= self.scaler * weight_vec
         out_state = fedops.set_param_in_state(lmodel_state_tth, weight_vec)
@@ -44,35 +46,40 @@ class AffineζAttack():
         return out_state
 
 
-class NaifttCraftedζAttack():
+class FangCraftedζAttack():
     """
-    Reference: Suppressing Poisoning Attacks on Federated Learning for Medical Imaging.
-    Taken from: https://github.com/Naiftt/SPAFD/
+    Paper: Local Model Poisoning Attacks to Byzantine-Robust Federated Learning
+    Reference from: https://github.com/Naiftt/SPAFD/
     """
 
-    def __init__(self, cfg, model_at_start):
+    def __init__(self, cfg, model_at_start, device="cpu"):
+        self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.lmbd = cfg.byztn_cfg["lambda"] # 0.1 in paper
 
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        self.wvec_tminus1 = fedops.get_param_from_state(model_at_start.state_dict(),
-                                keys_to_ignore=self.vec_state_ignore)
 
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+        local_states = []
+        for kid in omniscience.keys(): # clientwise train info
+            local_states.append(omniscience[kid]["model"].state_dict())
+        benign_state = fedops.global_average_statedict(local_states)
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1):
-        wvec_current = fedops.get_param_from_state(lmodel_state_tth,
-                                keys_to_ignore=self.vec_state_ignore)
+        wvec_benign = fedops.get_param_from_state(benign_state,
+                                keys_to_ignore=self.vec_state_ignore).to(self.device)
 
-        S = (wvec_current > self.wvec_tminus1).long()
+        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
+                                keys_to_ignore=self.vec_state_ignore).to(self.device)
+        S = (wvec_benign > gwvec_tminus1).long()
         S[S==0] = -1
-        attack_wvec =  wvec_current - (self.lmbd*S)
+        attack_wvec =  wvec_benign - (self.lmbd*S)
 
         out_state = fedops.set_param_in_state(lmodel_state_tth, attack_wvec,
                                     keys_to_ignore=self.vec_state_ignore)
-        self.wvec_tminus1 = wvec_current.clone()
 
         return out_state
+
 
 
 class OzfaturaROPζAttack():
@@ -81,7 +88,8 @@ class OzfaturaROPζAttack():
     modified on basecode from authors
     """
 
-    def __init__(self, cfg, model_at_start):
+    def __init__(self, cfg, model_at_start, device="cpu"):
+        self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.z_max = self.byz_cfg.get("z_max")
         self.pi    = self.byz_cfg.get("pi_angle") # angle
@@ -105,7 +113,7 @@ class OzfaturaROPζAttack():
             self.z_max = spstats.norm.ppf(cdf_value)
 
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1):
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
         ## Benign Gradients:-> torch.mean(benign_gradients, 1)
         # original work uses "mean of the benign gradients", exactness only possible in omniscient case

@@ -89,7 +89,8 @@ class NoGuardΞByzantine():
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
         if self.id in byz_clients:
-            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_init)
+            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(
+                self.cfg, self.gmodel_init, self.device)
             print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
@@ -206,7 +207,8 @@ class NoGuardΞByzantineDecopl():
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
         if self.id in byz_clients:
-            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(self.cfg, self.gmodel_init)
+            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(
+                self.cfg, self.gmodel_init, self.device)
             print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
