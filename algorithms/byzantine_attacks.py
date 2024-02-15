@@ -81,6 +81,53 @@ class FangCraftedζAttack():
         return out_state
 
 
+class ALIEζAttack():
+    """
+    Paper: A Little Is Enough: Circumventing Defenses For Distributed Learning
+    code modified: https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/attacks
+    """
+
+    def __init__(self, cfg, model_at_start, device="cpu"):
+
+        self.device = device
+        self.byz_cfg = cfg.byztn_cfg
+        self.z_max = self.byz_cfg.get("z_max")
+
+        self.num_client_k = n = cfg["data_centers_count"]
+        self.num_byzant_b = m = len(self.byz_cfg["byztn_clients"])
+        self.num_honest_g = g = n-m
+
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        ## this is global common start point
+        self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
+                                    keys_to_ignore=self.vec_state_ignore)
+
+        if not self.z_max:
+            s = np.floor(n / 2 + 1) - m
+            cdf_value = (n - m - s) / (n - m)
+            self.z_max = spstats.norm.ppf(cdf_value)
+
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+
+        # Loop over benign gradients
+        benign_wvec_list = []
+        for kid in omniscience.keys(): # clientwise train info
+            benign_wvec_list.append( fedops.get_param_from_state(
+                    omniscience[kid]["model"].state_dict(),
+                    keys_to_ignore=self.vec_state_ignore).to(self.device) )
+
+        benign_wvec = torch.vstack(benign_wvec_list)
+        mu = torch.mean(benign_wvec, dim=0)
+        std = torch.std(benign_wvec, dim=0)
+
+        attack_wvec = mu - std * self.z_max
+
+        out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
+                                    keys_to_ignore=self.vec_state_ignore)
+        return out_state
+
+
 
 class OzfaturaROPζAttack():
     """
@@ -105,7 +152,6 @@ class OzfaturaROPζAttack():
         ## this is global common start point
         self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
                                     keys_to_ignore=self.vec_state_ignore)
-        self.gwvec_tminus1:torch.Tensor = copy.deepcopy(self.gwvec_0th)
 
         if not self.z_max:
             s = np.floor(n / 2 + 1) - m
