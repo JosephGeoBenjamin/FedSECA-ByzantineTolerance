@@ -181,7 +181,7 @@ class NoGuardΞByzantineDecopl():
         In this each client will recieve differnt set of parameters at end
         of each round, since averaging weightage for models will vary for each
         client based on closeness to different models on some metric space
-    In this simply each model is given equal weightage, this just implementation place holder
+    In this, simply each model is given equal weightage, this just implementation place holder
 
     """
 
@@ -536,6 +536,75 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
 
 
 ##------------------------------------------------------------------------------
+
+class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
+    """
+    reference: Pillutla et al. Robust Aggregation for Federated Learning
+    paper: https://arxiv.org/abs/1912.13445
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.aggregator_func = self.__geomed_aggregation
+        self.budget_R  = int(self.defense_cfg["budget_iter_r"]) # 3 in paper
+        self.nu  = torch.tensor(self.defense_cfg["stability_nu"]) # 1e-6
+
+        print("Defense: Geometric Median")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+
+    #-------- Server methods ----------
+
+    def __geomed_aggregation(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        #             for l in lsets]
+        # sfully_wvec = torch.vstack(fully_wvecs)
+
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        alphas = torch.tensor([1 / len(lsets) for _ in lsets]).view(-1,1).to(self.device)
+        betas_list = []
+
+
+        ### Smoothed_Weiszfeld
+        v = torch.zeros_like(wvecs[0])
+        for r in range(self.budget_R):
+            l2dist = torch.norm(v - stacked_wvec, dim=1).view(-1,1)
+            betas = alphas / torch.maximum(l2dist, self.nu.to(self.device))
+
+            v = betas * stacked_wvec # b1*[w1] \ b2*[w2] \ b3*[w3] ...
+            v = v.sum(dim=0) / betas.sum(dim=0)
+
+            betas_list.append(betas.flatten().tolist())
+        ###
+
+        final_wvec = v.clone()
+
+        agg_state = fedops.set_param_in_state(state_dict_struct, final_wvec,
+                                              keys_to_ignore=self.vec_state_ignore)
+
+        info_dict = {"client_weightage":betas_list}
+        return agg_state, info_dict
+
+
+
 ##==============================================================================
 
 
@@ -707,7 +776,6 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 1
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = int(cfg.data_centers_count) # K
-        self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
@@ -720,6 +788,7 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 1
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
         self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
+        self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
@@ -874,7 +943,6 @@ class NewTauLambdaΞByzantine(NoGuardΞByzantine): # Attempt 2
         self.byztn_cfg = cfg.byztn_cfg
         self.defense_cfg = cfg.defense_cfg
         self.num_client_k = K = int(cfg.data_centers_count) # K
-        self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
 
         self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
@@ -887,6 +955,8 @@ class NewTauLambdaΞByzantine(NoGuardΞByzantine): # Attempt 2
             data_dist = data_dist[:K, :K] # ignore all distances row-column
 
         self.lambda_factor = self._get_lmbda_from_dist(data_dist)
+        self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
+
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it

@@ -262,8 +262,8 @@ class ClsFedHandler(object):
 
         ## TrainPhase attacks
         self.labelFlip=False
-        if CFG.byztn_cfg["byztn_method"] == "LabelFlipζAttack":
-            if self.id in CFG.byztn_cfg["byztn_clients"]:
+        if CFG.byztn_cfg.get("byztn_method") == "LabelFlipζAttack":
+            if self.id in CFG.byztn_cfg.get("byztn_clients"):
                 self.labelFlip = True
 
 

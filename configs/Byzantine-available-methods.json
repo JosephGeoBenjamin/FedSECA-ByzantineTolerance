@@ -66,6 +66,12 @@
     },
 
     {
+    "defense_method" : "GeoMedianRFAΞByzantine",
+    "stability_nu"   : 1e-6,
+    "budget_iter_r"  : 3
+    },
+
+    {
     "defense_method"  : "NewTauLambdaΞByzantine",
     "feature_extractor_d": 512,
     "datasummary" : "path/to/hdf5/with/dist_matrix/key.h5"
