@@ -245,8 +245,9 @@ class ClsFedHandler(object):
         self.validloader   = validloader
         self.lossfunc      = lossfunc
         self.device        = device
-        self.fedprtcl        = fedprtcl
+        self.fedprtcl      = fedprtcl
 
+        self.num_class     = int(CFG.clsfy_layers[-1])
         self.trainMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.validMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
         self.loc_val_best = 0.0
@@ -258,6 +259,13 @@ class ClsFedHandler(object):
         self.gdsyp_model  = None # copy of model received fomr server
         self.winit_model  = None # copy of starting seed Model
         self.agghatch     = None
+
+        ## TrainPhase attacks
+        self.labelFlip=False
+        if CFG.byztn_cfg["byztn_method"] == "LabelFlipζAttack":
+            if self.id in CFG.byztn_cfg["byztn_clients"]:
+                self.labelFlip = True
+
 
     def train_one_epoch(self, epoch):
 
@@ -288,6 +296,8 @@ class ClsFedHandler(object):
             img = img.to(self.device, non_blocking=True)
             tgt = tgt.to(self.device, non_blocking=True)
             if img.shape[0] < 2: continue # fix last batch size being 1 issue
+
+            if self.labelFlip: tgt = self.num_class - tgt -1; print("LABEL FLIPPED")
 
             optimizer.zero_grad()
             # with torch.cuda.amp.autocast():

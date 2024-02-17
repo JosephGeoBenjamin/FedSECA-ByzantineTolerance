@@ -18,6 +18,16 @@ lmodel_state_tth -> gmodel_state_tminus1 updated for one set LocalRounds before 
 Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
 """
 
+
+class LabelFlipζAttack():
+    def __init__(self, cfg, model_at_start, device="cpu" ):
+        # self.model_init = copy.deepcopy(model)
+        print("This is a dummy init; for Training Phase attack")
+
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+        return lmodel_state_tth
+
+
 class RandomizedζAttack():
     def __init__(self, cfg, model_at_start, device="cpu" ):
         # self.model_init = copy.deepcopy(model)
