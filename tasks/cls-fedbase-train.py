@@ -25,7 +25,11 @@ print(f"cuda version: {torch.version.cuda}")
 
 ##============================= Configure and Setup ============================
 
+# Enable CODES for analysing model parameters and log their statitics
 ANALYSE_MODELS = True
+# To enable CODES for seperate validation routine based on local clients data
+# user has to specify validation split in data csv, if not will yield empty results
+VALIDATION = False
 
 CFG = rutl.ObjDict(
 dataset = "ISIC",
@@ -266,7 +270,7 @@ class ClsFedHandler(object):
         if CFG.enable_proxreg:
             model_prox = copy.deepcopy(self.winit_model) ## --> change to
 
-        startValidMetric = self.run_validation(model)
+        if VALIDATION: startValidMetric = self.run_validation(model)
         ### --------------
 
         if scheduler: scheduler.last_epoch = epoch
@@ -309,38 +313,46 @@ class ClsFedHandler(object):
         if scheduler: scheduler.step()
 
         ### --------------
-        self.validMetric = self.run_validation(model)
+        if VALIDATION: self.validMetric = self.run_validation(model)
 
+        ### Logging
         logs = dict(mode="Epoch-up", epoch=epoch, ID=self.id,
                     trainloss = self.trainMetric.get_loss(),
                     trainacc  = self.trainMetric.get_balanced_accuracy(),
                     trainF1   = self.trainMetric.get_f1score(),
+                    trainlossInfo = self.trainMetric.get_loss_info_aggregates(),
+                    time=int(time.time())
+                    )
+        if VALIDATION:
+            vallogs = dict(
+                    validlossInfo = self.validMetric.get_loss_info_aggregates(),
                     validloss = self.validMetric.get_loss(),
                     validacc  = self.validMetric.get_balanced_accuracy(),
                     validF1   = self.validMetric.get_f1score(),
                     stValidloss = startValidMetric.get_loss(),
                     stValidacc  = startValidMetric.get_balanced_accuracy(),
                     stValidF1   = startValidMetric.get_f1score(),
-                    trainlossInfo = self.trainMetric.get_loss_info_aggregates(),
-                    validlossInfo = self.validMetric.get_loss_info_aggregates(),
-                    time=int(time.time()),)
+                    )
+            logs.update(vallogs)
+
         lutl.LOG2DICTXT(logs, CFG.gLogPath +'/train-local-stats.txt')
         lutl.LOG2CSV( [self.id,"#",epoch,"#"]+self.trainMetric.nnloss, CFG.gLogPath +'/metrics/train-losses.csv')
 
-        ## best val checkpoint
-        best_flag = False
-        if self.loc_val_best < logs['validF1']:
-            # torch.save(model.state_dict(), CFG.gWeightPath +f'/best_local_model_{self.id}.pth') ##commenting since unused
-            self.loc_val_best = logs['validF1']
-            best_flag = True
-            detail_stat = dict( ctime= time.ctime(),
-                    ID=self.id, best = best_flag, epoch=epoch,
-                    validbalacc = self.validMetric.get_balanced_accuracy(),
-                    validf1scr  = self.validMetric.get_f1score(),
-                    validreport = self.validMetric.get_class_report(),
-                    # validconfus = validMetric.get_confusion_matrix().tolist(),
-                )
-            lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-local-bests.txt', console=False)
+        ## best valiadation checkpoint
+        if VALIDATION:
+            best_flag = False
+            if self.loc_val_best < logs['validF1']:
+                # torch.save(model.state_dict(), CFG.gWeightPath +f'/best_local_model_{self.id}.pth') ##commenting since unused
+                self.loc_val_best = logs['validF1']
+                best_flag = True
+                detail_stat = dict( ctime= time.ctime(),
+                        ID=self.id, best = best_flag, epoch=epoch,
+                        validbalacc = self.validMetric.get_balanced_accuracy(),
+                        validf1scr  = self.validMetric.get_f1score(),
+                        validreport = self.validMetric.get_class_report(),
+                        # validconfus = validMetric.get_confusion_matrix().tolist(),
+                    )
+                lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-local-bests.txt', console=False)
 
 
         if ANALYSE_MODELS:
@@ -585,50 +597,51 @@ def simple_main(model_key=None, folder_suffix=""):
 
 
         ## ---- Global params Validation Routine ----
-        globalValidMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
+        if VALIDATION:
+            globalValidMetric = MultiClassMetrics(CFG.gLogPath+"/metrics/")
 
-        global_model.eval()
-        with torch.no_grad():
-            for img, tgt in tqdm(validdozers["all"]):
-                img = img.to(g_device, non_blocking=True)
-                tgt = tgt.to(g_device, non_blocking=True)
-                pred, featp = global_model.forward(img)
-                loss, loss_info = lossfn(pred, tgt, featp, agghatch)
-                globalValidMetric.add_entry(torch.argmax(pred, dim=1),
-                                            tgt, loss, loss_info)
+            global_model.eval()
+            with torch.no_grad():
+                for img, tgt in tqdm(validdozers["all"]):
+                    img = img.to(g_device, non_blocking=True)
+                    tgt = tgt.to(g_device, non_blocking=True)
+                    pred, featp = global_model.forward(img)
+                    loss, loss_info = lossfn(pred, tgt, featp, agghatch)
+                    globalValidMetric.add_entry(torch.argmax(pred, dim=1),
+                                                tgt, loss, loss_info)
 
-        ## Log Metrics
-        logs = dict(
-                global_round=Gstep,
-                run_time  = time.time()-start_time,
-                validloss = globalValidMetric.get_loss(),
-                validacc  = globalValidMetric.get_balanced_accuracy(),
-                validF1   = globalValidMetric.get_f1score(),
-                )
-        lutl.LOG2DICTXT(logs, CFG.gLogPath+'/train-global-stats.txt')
+            ## Log Metrics
+            logs = dict(
+                    global_round=Gstep,
+                    run_time  = time.time()-start_time,
+                    validloss = globalValidMetric.get_loss(),
+                    validacc  = globalValidMetric.get_balanced_accuracy(),
+                    validF1   = globalValidMetric.get_f1score(),
+                    )
+            lutl.LOG2DICTXT(logs, CFG.gLogPath+'/train-global-stats.txt')
 
 
-        ## save best model
-        best_flag = False
-        if logs['validF1'] > best_acc:
-            torch.save(global_model.state_dict(), CFG.gWeightPath +'/best_global_model.pth')
-            best_acc  = logs['validF1']
-            best_loss = logs['validloss']
-            best_flag = True
-            detail_stat = dict( ctime= time.ctime(),
-                    epoch=Gstep, best = best_flag,
-                    run_time=int(time.time() - start_time),
-                    validbalacc = globalValidMetric.get_balanced_accuracy(),
-                    validf1scr  = globalValidMetric.get_f1score(),
-                    validreport = globalValidMetric.get_class_report(),
-                    # validconfus = validMetric.get_confusion_matrix().tolist(),
-                )
-            lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-global-bests.txt', console=False)
-
+            ## save best model
+            best_flag = False
+            if logs['validF1'] > best_acc:
+                torch.save(global_model.state_dict(), CFG.gWeightPath +'/best_global_model.pth')
+                best_acc  = logs['validF1']
+                best_loss = logs['validloss']
+                best_flag = True
+                detail_stat = dict( ctime= time.ctime(),
+                        epoch=Gstep, best = best_flag,
+                        run_time=int(time.time() - start_time),
+                        validbalacc = globalValidMetric.get_balanced_accuracy(),
+                        validf1scr  = globalValidMetric.get_f1score(),
+                        validreport = globalValidMetric.get_class_report(),
+                        # validconfus = validMetric.get_confusion_matrix().tolist(),
+                    )
+                lutl.LOG2DICTXT(detail_stat, CFG.gLogPath+'/valid-global-bests.txt', console=False)
+        ## end VALIDATION
 
         ## --------- Testing routines ---------------
-        test_model_list = ["global_model"]+[f"local_model_{id}"
-                                for id in traindozers.keys()]
+
+        test_model_list = ["global_model"]
 
         ## Test every epoch for plotting
         if CFG.test_trend_full:
@@ -636,7 +649,11 @@ def simple_main(model_key=None, folder_suffix=""):
                 model_list=test_model_list,
                 folder_suffix="", ## defaults to original folder
                 ckpt_keys=["start"],
-                test_partitions=0)
+                test_partitions=0,
+                console=False)
+
+        test_model_list = ["global_model"]+[f"local_model_{id}"
+                                for id in traindozers.keys()]
 
         ## Test Last N epochs for non fluctuating results
         if (CFG.test_last_E_epochs is not None ) and (CFG.update_mode == "epoch"):
@@ -656,7 +673,8 @@ def simple_main(model_key=None, folder_suffix=""):
 def simple_test(saved_logpath, model_list:list=["global_model"],
                 epochs_ran=None, folder_suffix="",
                 ckpt_keys:list = ["start"],
-                test_partitions = CFG.test_partitions):
+                test_partitions = CFG.test_partitions,
+                console=True):
 
     gpu_device = torch.device("cuda")
     torch.cuda.device(gpu_device)
@@ -704,7 +722,7 @@ def simple_test(saved_logpath, model_list:list=["global_model"],
                         pred,_ = model.forward(img)
                         testMetric.add_entry(torch.argmax(pred, dim=1), tgt)
 
-                    ## Log detailed validation
+                    ## Log detailed testing
                     log_title = f"test-{m}-{p_k}-{c}"
                     detail_logs = dict(
                             model_name  = m,
@@ -723,7 +741,7 @@ def simple_test(saved_logpath, model_list:list=["global_model"],
                                     save_png= True, title=log_title).tolist(),
                         )
                     lutl.LOG2DICTXT(detail_logs, dir_to_save+'/test-results.txt',
-                                    console=True)
+                                    console=console)
 
                     testMetric._write_predictions(title=log_title)
 
