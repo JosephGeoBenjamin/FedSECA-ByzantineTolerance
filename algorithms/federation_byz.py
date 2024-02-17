@@ -402,11 +402,10 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        self.approach = self.defense_cfg["approach"]
-        self.aggregator_func = self.__coordinatewise_aggregation
-
         # number of byzzantines to ignore
-        self.cwtm_beta    = self.defense_cfg["cwtm_beta"] #B; should hold K-2B > 0
+        self.cwtm_beta = self.defense_cfg.get("cwtm_beta") #B; should hold K-2B > 0
+        self.approach  = self.defense_cfg["approach"]
+        self.aggregator_func = self.__coordinatewise_aggregation
 
         if self.num_client_k < (2 * self.cwtm_beta):
             raise Exception(f"Beta set is greater for given client count, 2*{self.cwtm_beta}>{self.num_client_k}")
@@ -695,7 +694,7 @@ class WeighOmegaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 0
         return agg_states_cli, info_dict
 
 
-##==============================================================================
+##------------------------------------------------------------------------------
 
 
 class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 1
