@@ -19,7 +19,14 @@
 
     {
     "byztn_clients": [],
-    "byztn_method" : "XieIPMζAttack"
+    "byztn_method" : "XieIPMζAttack",
+    "epsilon": 0.1
+    },
+
+    {
+    "byztn_clients": [],
+    "byztn_method" : "MimicζAttack",
+    "warmup_steps": 10
     },
 
     {

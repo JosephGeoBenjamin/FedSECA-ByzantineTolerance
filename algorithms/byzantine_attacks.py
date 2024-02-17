@@ -49,7 +49,7 @@ class AffineζAttack():
 class FangCraftedζAttack():
     """
     Paper: Local Model Poisoning Attacks to Byzantine-Robust Federated Learning
-    code modified: https://github.com/Naiftt/SPAFD/
+    code reference: https://github.com/Naiftt/SPAFD/
     """
 
     def __init__(self, cfg, model_at_start, device="cpu"):
@@ -160,7 +160,7 @@ class XieIPMζAttack():
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
 
-        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1.state_dict(),
+        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
                                     keys_to_ignore=self.vec_state_ignore)
 
         delta_wvec = benign_wvec - gwvec_tminus1
@@ -168,6 +168,89 @@ class XieIPMζAttack():
 
         out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
                                     keys_to_ignore=self.vec_state_ignore)
+        return out_state
+
+
+
+class MimicζAttack():
+    """
+    Paper: Byzantine-Robust Learning on Heterogeneous Datasets via Bucketing
+    code modified: https://github.com/epfml/byzantine-robust-noniid-optimizer/tree/main/codes/attacks
+    """
+    def __init__(self, cfg, model_at_start, device="cpu"):
+
+        self.device = device
+        self.byz_cfg = cfg.byztn_cfg
+        self.warmup_steps = self.byz_cfg.get("warmup_steps")
+
+        self.num_client_k = n = cfg["data_centers_count"]
+        self.num_byzant_b = m = len(self.byz_cfg["byztn_clients"])
+        self.num_honest_g = g = n-m
+
+        self.byzant_ranks = self.byz_cfg["byztn_clients"]
+        self.honest_ranks = list( set(range(self.num_client_k)) - set(self.byzant_ranks) )
+
+        self.vec_state_ignore = ["num_batches_tracked"]
+        ## this is global common start point
+        self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
+                                    keys_to_ignore=self.vec_state_ignore)
+
+        self.t  = 0
+        self.target_rank = None
+        self.mu = torch.zeros_like(self.gwvec_0th, device=self.device)
+
+        gen = torch.Generator(device=self.device)
+        gen.manual_seed(0)
+        self.z = torch.rand(self.gwvec_0th.shape, generator=gen, device=self.device)
+
+
+    def _warmup_routine(self, curr_good_gradvecs:torch.tensor):
+        #NOTE: Paper seems to be okay with Weights yet implementation had gradients
+        # weights are passed instead of grad
+
+        curr_gr = curr_good_gradvecs
+        curr_gr_avg = curr_good_gradvecs.mean(dim=0)
+
+        ### Finding the Zee
+
+        self.mu = self.t / (1 + self.t) * self.mu + curr_gr_avg / (1 + self.t)
+
+        cumul = ( (curr_gr - self.mu)*(curr_gr - self.mu) ).sum(dim=0)
+        self.z = (self.t/(1+self.t)) * self.z + \
+                (cumul/cumul.norm() / (1+self.t) ) * self.z
+        self.z = self.z / self.z.norm()
+
+        ### client to mimic
+        g_dot_z = (curr_gr *self.z).sum(dim=1)
+        mv = torch.max(g_dot_z)
+        mi = torch.argmax(g_dot_z)
+        mg = curr_gr[mi]
+        print("ζ"*5 +"Warmup Mimic Client", mi, "val", mv)
+
+        return mi
+
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+        good_wvec_list = []
+        for kid in omniscience.keys(): # clientwise train info
+            if kid in self.honest_ranks:
+                good_wvec_list.append( fedops.get_param_from_state(
+                        omniscience[kid]["model"].state_dict(),
+                        keys_to_ignore=self.vec_state_ignore).to(self.device) )
+        stacked_good_wvec = torch.vstack(good_wvec_list)
+
+        # Figure out the client to mimic
+        if (self.t < self.warmup_steps) or (self.target_rank is None):
+            self.target_rank = self._warmup_routine(stacked_good_wvec)
+        else: # Fixed that client
+            self.target_rank = self.target_rank
+
+        print("Mimicing", self.target_rank)
+        self.t += 1
+
+        attack_wvec = stacked_good_wvec[self.target_rank]
+        out_state = fedops.set_param_in_state(lmodel_state_tth, attack_wvec,
+                                    keys_to_ignore=self.vec_state_ignore)
+
         return out_state
 
 

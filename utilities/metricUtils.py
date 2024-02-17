@@ -33,6 +33,7 @@ class MultiClassMetrics():
         self.loss_info_list = []
         self.digits = digits
         self.logpath = logpath
+        self.div_eta = 1e-12
         os.makedirs(self.logpath, exist_ok=True)
 
     def reset(self, save_results = False):
@@ -46,7 +47,7 @@ class MultiClassMetrics():
         if loss_info: self.loss_info_list.append(loss_info)
 
     def get_loss(self):
-        r = sum(self.nnloss) / len(self.nnloss)
+        r = sum(self.nnloss) / (len(self.nnloss) + self.div_eta)
         return round(r, self.digits)
 
     def get_accuracy(self):
