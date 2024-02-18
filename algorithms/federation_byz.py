@@ -78,6 +78,7 @@ class NoGuardΞByzantine():
 
         self.gmodel_init  = copy.deepcopy(model).to(self.device) # common model initialization
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
 
         self.aggregator_func = self.__plain_fedavg #override this to introduce methods
         print("DEFENSE: None")
@@ -787,8 +788,8 @@ class TauThetaLambdaSKDHΞByzantineDecopl(NoGuardΞByzantineDecopl): # Attempt 1
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:-1, :-1] # ignore all distances
 
-        self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
         self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
+        self.client_clip_factor = self._get_lmbda_from_dist(data_dist)
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
@@ -954,8 +955,8 @@ class NewTauLambdaΞByzantine(NoGuardΞByzantine): # Attempt 2
             data_dist = hdf5_file["dist_matrix"][()]
             data_dist = data_dist[:K, :K] # ignore all distances row-column
 
-        self.lambda_factor = self._get_lmbda_from_dist(data_dist)
         self.featx_d  = cfg.defense_cfg["feature_extractor_d"]  # D --> final feature size before classifier
+        self.lambda_factor = self._get_lmbda_from_dist(data_dist)
 
 
         ##
