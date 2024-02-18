@@ -586,15 +586,16 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
         ### Smoothed_Weiszfeld
         v = torch.zeros_like(wvecs[0])
-        for r in range(self.budget_R):
-            l2dist = torch.norm(v - stacked_wvec, dim=1).view(-1,1)
-            betas = alphas / torch.maximum(l2dist, self.nu.to(self.device))
+        with torch.no_grad():
+            for r in range(self.budget_R):
+                l2dist = torch.norm(v - stacked_wvec, dim=1).view(-1,1)
+                betas = alphas / torch.maximum(l2dist, self.nu.to(self.device))
 
-            v = betas * stacked_wvec # b1*[w1] \ b2*[w2] \ b3*[w3] ...
-            v = v.sum(dim=0) / betas.sum(dim=0)
+                v = betas * stacked_wvec # b1*[w1] \ b2*[w2] \ b3*[w3] ...
+                v = v.sum(dim=0) / betas.sum(dim=0)
 
-            betas_list.append(betas.flatten().tolist())
-        ###
+                betas_list.append(betas.flatten().tolist())
+         ###
 
         final_wvec = v.clone()
 

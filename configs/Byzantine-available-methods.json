@@ -26,7 +26,7 @@
     {
     "byztn_clients": [],
     "byztn_method" : "MimicζAttack",
-    "warmup_steps": 10
+    "warmup_steps": 15
     },
 
     {
@@ -35,8 +35,12 @@
     "pi_angle": 90 ,
     "rho_reloc": 1 ,
     "lambda_refwt": 0.9
-    }
+    },
 
+    {
+    "byztn_clients": [],
+    "byztn_method" : "LabelFlipζAttack"
+    }
 ],
 
 
