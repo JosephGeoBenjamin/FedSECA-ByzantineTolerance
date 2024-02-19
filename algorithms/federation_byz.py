@@ -595,7 +595,7 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
                 v = v.sum(dim=0) / betas.sum(dim=0)
 
                 betas_list.append(betas.flatten().tolist())
-         ###
+        ###
 
         final_wvec = v.clone()
 

@@ -29,7 +29,7 @@ from sketching.sinkhorn_metric import sinkhorn_pointcloud_pytorch
 
 CFG = rutl.ObjDict(
     cloud_point_count = 1000,
-    checkpoint_dir= "hypotheses/DataSketchColl/ORGAN-main-002/1K-pts/",
+    checkpoint_dir= "hypotheses/DataSketchColl/ISIC-main-002/1K-pts/",
 )
 
 ### ----------------------------------------------------------------------------
@@ -41,7 +41,7 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
         from datacode.isic_jfed_data import Isic2019_JFedDataset
         img_size_in = cfg.image_size
         traindataset = Isic2019_JFedDataset( data_path= cfg.data_path,
-                        csv_name='isic_Full_Train_data.csv',
+                        csv_name='isic_train_data.csv',
                         center= center_index,
                         split_type = split_type,
                         transforms=IsicClassifyAuguments(method="infer",
@@ -65,7 +65,7 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
         from datacode.orgmnist_jfed_data import OrganMnist_JFedDataset
         img_size_in   = cfg.image_size
         traindataset = OrganMnist_JFedDataset( data_path= cfg.data_path,
-                        csv_name="organmnist_Full_TrainV2_data.csv",
+                        csv_name="organmnist_trainV2_data.csv",
                         center= center_index,
                         split_type = split_type,
                         transforms=OrganMnistClassifyAuguments(method="infer",
@@ -106,6 +106,11 @@ def getModel(model_name):
         from algorithms.feature_extractor import resnet9
         model = resnet9()
         model.classifier = torch.nn.Identity()
+    if model_name == 'efficientnet_b0':
+        model = torchvision.models.efficientnet_b0(zero_init_residual=True,
+                                weights="DEFAULT")
+        model.classifier = torch.nn.Identity()  #remove fc of default arch
+
     return model
 
 
@@ -534,9 +539,10 @@ def run_for_cifar100():
 
 def run_for_isicflamby():
     CFG.dataset   = "ISIC"
-    CFG.weight_root_path = "hypotheses/Cls1-isic/E00-base(ansys/E00m-Cls-Resnet-002_B32_Lr1e-4/"
+    CFG.weight_root_path = "hypotheses/CLS1-series/Cls1-isic/E00-base(ansys/E00m-Cls-Effnetb0-002_B32_Lr5e-4/"
 
     CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed/"
+    CFG.model = "efficientnet_b0"
     CFG.data_centers_count = 6
     CFG.image_size = 200
 
@@ -590,8 +596,8 @@ if __name__ == '__main__':
 
     # run_for_mnist()
     # run_for_cifar100()
-    # run_for_isicflamby()
-    run_for_organmnist()
+    run_for_isicflamby()
+    # run_for_organmnist()
 
 
 

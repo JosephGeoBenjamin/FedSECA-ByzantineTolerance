@@ -78,6 +78,7 @@
     {
     "defense_method"  : "NewTauLambdaΞByzantine",
     "feature_extractor_d": 512,
+    "1_feature_extractor_d": 1280,
     "datasummary" : "path/to/hdf5/with/dist_matrix/key.h5"
     }
 
