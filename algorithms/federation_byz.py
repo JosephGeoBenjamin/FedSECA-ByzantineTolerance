@@ -605,6 +605,106 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
         info_dict = {"client_weightage":betas_list}
         return agg_state, info_dict
 
+##==============================================================================
+
+class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = K = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+
+        self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
+        if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
+
+        self.aggregator_func = self.__custom_aggregate
+
+        ##
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+
+        print("Defense: Clipping Bucketing")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+
+    def init_stacked_wvecs(self, model):
+        wvec = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore)
+        self.wvec_init = wvec.clone()
+        self.aggwvec_tminus1 = wvec.clone()
+
+
+    def get_tau(self):
+        beta = 0.9
+        return torch.tensor(10/1-beta).view(1).to(self.device)
+
+
+    #-------- Server methods ----------
+    def safe_divide(self, nu, de, fill=1.0):
+        res = torch.full_like(de, fill_value=fill)
+        mask = (de != 0.0)
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
+        return res
+
+    def __custom_aggregate(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = torch.zeros_like(stacked_wvec)
+
+        K = len(lsets)
+
+        tau = self.get_tau()
+
+        momentum = self.aggwvec_tminus1.clone()
+
+        ## Clipping
+        for m in range(self.clip_iters):
+            stacked_gdelta = torch.norm(stacked_wvec-momentum, dim=1).view(-1, 1) #
+
+            tau_by_ccden = self.safe_divide(tau, stacked_gdelta, fill=0.0) ## just setting clipping radius for zero norm
+            rad_comp = torch.minimum(torch.tensor(1), tau_by_ccden).view(-1,1)
+
+            clipped_deltawvec = rad_comp * (stacked_wvec - momentum) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_aggdelta = torch.mean(clipped_deltawvec, dim = 0)
+
+            momentum = momentum + clipped_aggdelta
+
+
+        agg_state = fedops.set_param_in_state(state_dict_struct, momentum,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus1 = momentum.clone()
+
+        rad_scales = rad_comp.flatten().tolist()
+        info_dict = {"client_clip_weightage":rad_scales}
+
+        return agg_state, info_dict
+
+
+
 
 
 ##==============================================================================
@@ -1035,12 +1135,14 @@ class NewTauLambdaΞByzantine(NoGuardΞByzantine): # Attempt 2
         rad_scales = []; g_deltas = []
         for i in range(stacked_wvec.shape[0]):
             ## Tau Computes
-            gdelta = torch.norm(aggwvec_tminus1 - stacked_wvec[i]).view(1) #scalar
-            tauj = lmbd_mat[i].view(-1, 1) * gdelta
+            gdelta = torch.norm(aggwvec_tminus1 - stacked_wvec[i], dim=1).view(1) #scalar
+            taui = lmbd_mat[i].view(-1, 1) * gdelta
 
             ccden = torch.norm(stacked_wvec - stacked_wvec[i], dim=1).view(-1,1)
-            taui_by_ccden = self.safe_divide(tauj, ccden, fill=0.0) ## fills i by i as zero w.r.t method of interest
+            taui_by_ccden = self.safe_divide(taui, ccden, fill=0.0) ## fills i by i as zero w.r.t method of interest
             rad_comp = torch.minimum(torch.tensor(1), taui_by_ccden).view(-1,1)
+
+            rad_comp = taui *0 +1 #^^^^^)))))))) Bypasss
 
             ## start core
             clipped_deltawvec = rad_comp * (stacked_wvec - aggwvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
