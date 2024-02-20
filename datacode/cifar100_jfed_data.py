@@ -34,7 +34,7 @@ class Cifar100_JFedDataset(torch.utils.data.Dataset):
     ):
 
         # cls_csv = csv_name if csv_name else  "cifar100_clsfy_data.csv"
-        cls_csv = csv_name if csv_name else  "cifar100_Full_Train_data.csv"
+        cls_csv = csv_name if csv_name else  "cifar100_train_data.csv"
         ssl_csv = csv_name if csv_name else  "cifar100_ssl_data.csv"
         test_csv = csv_name if csv_name else "cifar100_test_data.csv"
 

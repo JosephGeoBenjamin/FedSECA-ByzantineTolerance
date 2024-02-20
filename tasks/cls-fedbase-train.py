@@ -775,7 +775,9 @@ if __name__ == '__main__':
         """For running different alephs/iidness in cifar100 or mnists"""
 
         if CFG.dataset == "CIFAR":
-            quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
+            if CFG.dirichlet_alpha is False:
+                quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
+            else: quantity = [CFG.dirichlet_alpha]
 
             for q in quantity:
                 CFG.dirichlet_alpha = q   #~~~~
