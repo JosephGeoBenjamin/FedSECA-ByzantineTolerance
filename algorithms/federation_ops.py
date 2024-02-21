@@ -68,6 +68,25 @@ def global_average_statedict(w:list, device = "cpu"):
     return w_avg
 
 
+def weighted_average_statedict(w:list, alphas= [], device = "cpu"):
+    """
+    #TODO: check for correctness
+    w: list of pytorch weights statedict
+    Returns the average of the weights as statedict
+    """
+    if not alphas:
+        alphas = [1/len(w) for _ in range(w)]
+
+    w_avg = copy.deepcopy(w[0])
+    for key in w_avg.keys():
+        w_avg[key] = alphas[0]*w_avg[key].to(device)
+        for i in range(1, len(w)):
+            w_avg[key] = w_avg[key] + (alphas[i] * w[i][key].to(device))
+
+    return w_avg
+
+
+
 def get_param_from_model(model:torch.nn.Module, only_with_grad=False):
     param_vec = []
     for p in model.parameters():

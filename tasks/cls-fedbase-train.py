@@ -471,7 +471,7 @@ def simple_main(model_key=None, folder_suffix=""):
     ## Automatically resume from checkpoint if it exists and enabled
     if os.path.exists(CFG.gWeightPath +'/checkpoint.pth') and CFG.resume_training:
         saved_global_round = 0
-        print("regarding resuming training as Chadwick Boseman said `We Don't do that here`")
+        print("regarding resuming training, as Black Panther said `We Don't do that here`")
 
         # ckpt = torch.load(CFG.gWeightPath  +'/checkpoint.pth',
         #                     map_location='cpu')
