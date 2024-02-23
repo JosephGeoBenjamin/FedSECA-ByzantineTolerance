@@ -838,49 +838,70 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         aggmvec_tminus1 = self.aggmvec_tminus1.clone().view(1, -1)
         stacked_mveci_tminus1 = self.stacked_mveci_tminus1
 
+        torch_pi = torch.tensor(np.pi)
 
         ## Clientwise reference Clipping
         mi_scales = []
+        mitheta_scales = []
         outk_mveci = torch.zeros_like(stacked_wvec)
         for i in range(stacked_wvec.shape[0]):
 
             inorm = torch.norm(stacked_wvec[i]-stacked_mveci_tminus1[i]).view(1)
-            icosr =  torch.acos(torch_F.cosine_similarity(  # radians
-                            stacked_wvec[i].view(1,-1), stacked_mveci_tminus1[i].view(1,-1))).view(1)
-            taui = (inorm+icosr) / 2
+            # icosr =  torch.acos(torch_F.cosine_similarity(  # radians
+            #                 stacked_wvec[i].view(1,-1), stacked_mveci_tminus1[i].view(1,-1))).view(1)
+            taui = inorm
 
             stacked_inorm = torch.norm(stacked_wvec-stacked_wvec[i], dim=1).view(-1,1)
-            stacked_icosr = torch.acos(torch_F.cosine_similarity(  # radians
-                            stacked_wvec, stacked_wvec[i], dim=1)).view(-1,1)
-            ccdeni = (stacked_inorm + stacked_icosr) / 2
+            # stacked_icosr = torch.acos(torch_F.cosine_similarity(  # radians
+            #                 stacked_wvec, stacked_wvec[i], dim=1)).view(-1,1)
+            ccdeni = stacked_inorm
 
             taui_by_ccdeni = self.safe_divide(taui, ccdeni, fill=1.0) # this will return 1 for taui by ccdenii
             scale_seci = torch.minimum(torch.tensor(1), taui_by_ccdeni).view(-1,1)
 
-            clipped_delta_mi = scale_seci * (stacked_wvec - stacked_mveci_tminus1[i]) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            thcosi =  torch.acos(torch_F.cosine_similarity(  # radians
+                            stacked_wvec, stacked_mveci_tminus1[i].view(1,-1))).view(-1,1)
+            thcosi_rel = (thcosi[i] / thcosi)
+            scale_thetai = torch.exp(2*torch_pi*(thcosi_rel-1))
+            scale_thetai = torch.minimum(torch.tensor(1), scale_thetai).view(-1,1)
+
+            clipped_delta_mi = scale_seci * scale_thetai *(stacked_wvec - stacked_mveci_tminus1[i]) # s1*[v1] \ s2*[v2] \ s3*v3 ...
             clipped_delta_mi[i] = 0 # remove i-th client update from momentum_i
             clipped_delta_mi = torch.sum(clipped_delta_mi, dim = 0) / (K-1)
 
             mveci = stacked_mveci_tminus1[i] + clipped_delta_mi
             outk_mveci[i, :] = mveci
             mi_scales.append(scale_seci.flatten().tolist())
+            mitheta_scales.append(scale_thetai.flatten().tolist())
 
         ## Global reference clipping
 
-        gnorm = torch.norm(stacked_wvec-aggmvec_tminus1, dim=1).view(-1,1)
-        gcosr =  torch.acos(torch_F.cosine_similarity(  # radians
-                        stacked_wvec, aggmvec_tminus1, dim=1)).view(-1,1)
-        taug = (gnorm+gcosr) / 2
+        # gnorm = torch.norm(stacked_wvec-aggmvec_tminus1, dim=1).view(-1,1)
+        # gcosr =  torch.acos(torch_F.cosine_similarity(  # radians
+        #                 stacked_wvec, aggmvec_tminus1, dim=1)).view(-1,1)
+        # taug = (gnorm+gcosr) / 2
 
-        stacked_gnorm = torch.norm(outk_mveci-aggmvec_tminus1, dim=1).view(-1, 1) #
-        stacked_gcosr = torch.acos(torch_F.cosine_similarity(  # radians
-                            outk_mveci, aggmvec_tminus1, dim=1)).view(-1,1)
-        ccdeng = (stacked_gnorm + stacked_gcosr) / 2
+        # stacked_gnorm = torch.norm(outk_mveci-aggmvec_tminus1, dim=1).view(-1, 1) #
+        # stacked_gcosr = torch.acos(torch_F.cosine_similarity(  # radians
+        #                     outk_mveci, aggmvec_tminus1, dim=1)).view(-1,1)
+        # ccdeng = (stacked_gnorm + stacked_gcosr) / 2
 
-        taug_by_ccdeng = self.safe_divide(taug, ccdeng, fill=0.0) ## just setting clipping radius for zero norm
-        scale_secg = torch.minimum(torch.tensor(1), taug_by_ccdeng).view(-1,1)
+        # taug_by_ccdeng = self.safe_divide(taug, ccdeng, fill=0.0) ## just setting clipping radius for zero norm
+        # scale_secg = torch.minimum(torch.tensor(1), taug_by_ccdeng).view(-1,1)
 
-        clipped_delta_g = scale_secg * (outk_mveci - aggmvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        semi_aggmvec = torch.mean(outk_mveci, dim=0)
+        recov_stacked_wvec = semi_aggmvec - outk_mveci
+
+        gradients_recov = recov_stacked_wvec - aggmvec_tminus1
+        gradients_mveci = outk_mveci - aggmvec_tminus1
+
+        thcosg =  torch.acos(torch_F.cosine_similarity(  # radians
+                        gradients_mveci, gradients_recov)).view(-1,1)
+
+        scale_thetag = torch.exp(-2*torch_pi*(thcosg-torch_pi/2))
+        scale_thetag = torch.minimum(torch.tensor(1), scale_thetag).view(-1,1)
+
+        clipped_delta_g = scale_thetag * gradients_recov # s1*[v1] \ s2*[v2] \ s3*v3 ...
         clipped_delta_g = torch.mean(clipped_delta_g, dim = 0)
 
         aggmvec = aggmvec_tminus1 + clipped_delta_g
@@ -890,9 +911,10 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         self.aggwvec_tminus1 = aggmvec.clone()
         self.stacked_mveci_tminus1 = outk_mveci.clone()
 
-        g_scales = scale_secg.flatten().tolist()
+        g_scales = scale_thetag.flatten().tolist()
 
-        info_dict = {"client_clip_weightage":mi_scales,
-                     "global_clip_weightage":g_scales}
+        info_dict = {"client_clip_weightage" :mi_scales,
+                     "client_theta_weightage":mitheta_scales,
+                     "global_clip_weightage" :g_scales}
 
         return agg_state, info_dict
