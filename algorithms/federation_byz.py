@@ -649,7 +649,7 @@ class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
 
     def get_tau(self):
         beta = 0.9
-        return torch.tensor(10/1-beta).view(1).to(self.device)
+        return torch.tensor(500).view(1).to(self.device)
 
 
     #-------- Server methods ----------
@@ -728,7 +728,7 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         # self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
         # if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
 
-        self.aggregator_func = self.__custom_aggregate
+        self.aggregator_func = self.__custom_two_aggregate
 
         ##
         if self.id == "G": #large tensors, so why waste mem
@@ -749,15 +749,15 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         self.stacked_mveci_tminus1 = torch.vstack( [wvec]*self.num_client_k )
 
 
-    def get_tau(self):
+    def get_fixed_tau(self):
         beta = 0.9
-        return torch.tensor(10/1-beta).view(1).to(self.device)
+        return torch.tensor(500).view(1).to(self.device)
 
 
     #-------- Server methods ----------
     def safe_divide(self, nu, de, fill=1.0):
         res = torch.full_like(de, fill_value=fill)
-        mask = (de != 0.0)
+        mask = (de < 1e-12)
 
         if (nu.shape == mask.shape): nu_ = nu[mask]
         elif (sum(nu.shape) == 1):   nu_ = nu
@@ -766,7 +766,7 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         res[mask] = torch.div(nu_, de[mask])
         return res
 
-    def __custom_aggregate(self, lsets):
+    def __custom_one_aggregate(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         K = len(lsets)
 
@@ -778,7 +778,7 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         aggmvec_tminus1 = self.aggmvec_tminus1.clone().view(1, -1)
         stacked_mveci_tminus1 = self.stacked_mveci_tminus1
 
-        tau = self.get_tau()
+        tau = self.get_fixed_tau()
 
         ## Clientwise reference Clipping
         mi_scales = []
@@ -803,9 +803,81 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         ## Global reference clipping
         stacked_gnorm = torch.norm(outk_mveci-aggmvec_tminus1, dim=1).view(-1, 1) #
         stacked_gcosr = torch.acos(torch_F.cosine_similarity(  # radians
-                            outk_mveci[i], aggmvec_tminus1, dim=1)).view(-1,1)
+                            outk_mveci, aggmvec_tminus1, dim=1)).view(-1,1)
         ccdeng = (stacked_gnorm + stacked_gcosr) / 2
         taug_by_ccdeng = self.safe_divide(tau, ccdeng, fill=0.0) ## just setting clipping radius for zero norm
+        scale_secg = torch.minimum(torch.tensor(1), taug_by_ccdeng).view(-1,1)
+
+        clipped_delta_g = scale_secg * (outk_mveci - aggmvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        clipped_delta_g = torch.mean(clipped_delta_g, dim = 0)
+
+        aggmvec = aggmvec_tminus1 + clipped_delta_g
+
+        agg_state = fedops.set_param_in_state(state_dict_struct, aggmvec.view(-1),
+                                                keys_to_ignore=self.vec_state_ignore)
+        self.aggwvec_tminus1 = aggmvec.clone()
+        self.stacked_mveci_tminus1 = outk_mveci.clone()
+
+        g_scales = scale_secg.flatten().tolist()
+
+        info_dict = {"client_clip_weightage":mi_scales,
+                     "global_clip_weightage":g_scales}
+
+        return agg_state, info_dict
+
+
+    def __custom_two_aggregate(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        aggmvec_tminus1 = self.aggmvec_tminus1.clone().view(1, -1)
+        stacked_mveci_tminus1 = self.stacked_mveci_tminus1
+
+
+        ## Clientwise reference Clipping
+        mi_scales = []
+        outk_mveci = torch.zeros_like(stacked_wvec)
+        for i in range(stacked_wvec.shape[0]):
+
+            inorm = torch.norm(stacked_wvec[i]-stacked_mveci_tminus1[i]).view(1)
+            icosr =  torch.acos(torch_F.cosine_similarity(  # radians
+                            stacked_wvec[i].view(1,-1), stacked_mveci_tminus1[i].view(1,-1))).view(1)
+            taui = (inorm+icosr) / 2
+
+            stacked_inorm = torch.norm(stacked_wvec-stacked_wvec[i], dim=1).view(-1,1)
+            stacked_icosr = torch.acos(torch_F.cosine_similarity(  # radians
+                            stacked_wvec, stacked_wvec[i], dim=1)).view(-1,1)
+            ccdeni = (stacked_inorm + stacked_icosr) / 2
+
+            taui_by_ccdeni = self.safe_divide(taui, ccdeni, fill=1.0) # this will return 1 for taui by ccdenii
+            scale_seci = torch.minimum(torch.tensor(1), taui_by_ccdeni).view(-1,1)
+
+            clipped_delta_mi = scale_seci * (stacked_wvec - stacked_mveci_tminus1[i]) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_delta_mi[i] = 0 # remove i-th client update from momentum_i
+            clipped_delta_mi = torch.sum(clipped_delta_mi, dim = 0) / (K-1)
+
+            mveci = stacked_mveci_tminus1[i] + clipped_delta_mi
+            outk_mveci[i, :] = mveci
+            mi_scales.append(scale_seci.flatten().tolist())
+
+        ## Global reference clipping
+
+        gnorm = torch.norm(stacked_wvec-aggmvec_tminus1, dim=1).view(-1,1)
+        gcosr =  torch.acos(torch_F.cosine_similarity(  # radians
+                        stacked_wvec, aggmvec_tminus1, dim=1)).view(-1,1)
+        taug = (gnorm+gcosr) / 2
+
+        stacked_gnorm = torch.norm(outk_mveci-aggmvec_tminus1, dim=1).view(-1, 1) #
+        stacked_gcosr = torch.acos(torch_F.cosine_similarity(  # radians
+                            outk_mveci, aggmvec_tminus1, dim=1)).view(-1,1)
+        ccdeng = (stacked_gnorm + stacked_gcosr) / 2
+
+        taug_by_ccdeng = self.safe_divide(taug, ccdeng, fill=0.0) ## just setting clipping radius for zero norm
         scale_secg = torch.minimum(torch.tensor(1), taug_by_ccdeng).view(-1,1)
 
         clipped_delta_g = scale_secg * (outk_mveci - aggmvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
