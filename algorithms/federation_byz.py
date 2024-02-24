@@ -846,30 +846,39 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         outk_mveci = torch.zeros_like(stacked_wvec)
         for i in range(stacked_wvec.shape[0]):
 
-            inorm = torch.norm(stacked_wvec[i]-stacked_mveci_tminus1[i]).view(1)
-            # icosr =  torch.acos(torch_F.cosine_similarity(  # radians
-            #                 stacked_wvec[i].view(1,-1), stacked_mveci_tminus1[i].view(1,-1))).view(1)
+            inorm = torch.norm(stacked_wvec[i]-aggmvec_tminus1).view(1)
             taui = inorm
 
-            stacked_inorm = torch.norm(stacked_wvec-stacked_wvec[i], dim=1).view(-1,1)
-            # stacked_icosr = torch.acos(torch_F.cosine_similarity(  # radians
-            #                 stacked_wvec, stacked_wvec[i], dim=1)).view(-1,1)
+            stacked_inorm = torch.norm(stacked_wvec-aggmvec_tminus1, dim=1).view(-1,1)
             ccdeni = stacked_inorm
 
             taui_by_ccdeni = self.safe_divide(taui, ccdeni, fill=1.0) # this will return 1 for taui by ccdenii
             scale_seci = torch.minimum(torch.tensor(1), taui_by_ccdeni).view(-1,1)
 
             thcosi =  torch.acos(torch_F.cosine_similarity(  # radians
-                            stacked_wvec, stacked_mveci_tminus1[i].view(1,-1))).view(-1,1)
-            thcosi_rel = (thcosi[i] / thcosi)
-            scale_thetai = torch.exp(2*torch_pi*(thcosi_rel-1))
-            scale_thetai = torch.minimum(torch.tensor(1), scale_thetai).view(-1,1)
+                            stacked_wvec, aggmvec_tminus1.view(1,-1))).view(-1,1)
+            # thcosi_rel = (thcosi[i] / thcosi)
+            # scale_thetai = torch.exp(2*torch_pi*(thcosi_rel-1))
+            # scale_thetai = torch.minimum(torch.tensor(1), scale_thetai).view(-1,1)
 
-            clipped_delta_mi = scale_seci * scale_thetai *(stacked_wvec - stacked_mveci_tminus1[i]) # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            clipped_delta_mi[i] = 0 # remove i-th client update from momentum_i
-            clipped_delta_mi = torch.sum(clipped_delta_mi, dim = 0) / (K-1)
+            thcosi_std = thcosi.std()
+            if   (thcosi.median() < thcosi.mean()): thcosi_std = thcosi[thcosi<thcosi.median()].std()
+            elif (thcosi.median() > thcosi.mean()): thcosi_std = thcosi[thcosi>thcosi.median()].std()
+            thcosi_std = thcosi_std.nan_to_num(nan=1)
+            scale_thetai = torch.exp(-0.5*torch.square((thcosi-thcosi.median())/thcosi_std))
 
-            mveci = stacked_mveci_tminus1[i] + clipped_delta_mi
+            # breakpoint()
+            scale_thetai = 1.0 - torch.isclose(scale_thetai, torch.zeros_like(scale_thetai)).float()
+
+            # clipped_delta_mi = scale_seci * scale_thetai *(stacked_wvec - aggmvec_tminus1) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            # clipped_delta_mi[i, :] = 0 # remove i-th client update from momentum_i
+            # clipped_delta_mi = torch.sum(clipped_delta_mi, dim = 0) / (K-1)
+            # mveci = aggmvec_tminus1 + clipped_delta_mi
+
+            rescaled_wvec = scale_seci * scale_thetai * stacked_wvec
+            rescaled_wvec[i, :] = 0
+            mveci = torch.sum(rescaled_wvec, dim=0) / (K-1)
+
             outk_mveci[i, :] = mveci
             mi_scales.append(scale_seci.flatten().tolist())
             mitheta_scales.append(scale_thetai.flatten().tolist())
@@ -894,17 +903,37 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
 
         gradients_recov = recov_stacked_wvec - aggmvec_tminus1
         gradients_mveci = outk_mveci - aggmvec_tminus1
+        gradients_wvec  = stacked_wvec-aggmvec_tminus1
 
         thcosg =  torch.acos(torch_F.cosine_similarity(  # radians
                         gradients_mveci, gradients_recov)).view(-1,1)
 
-        scale_thetag = torch.exp(-2*torch_pi*(thcosg-torch_pi/2))
-        scale_thetag = torch.minimum(torch.tensor(1), scale_thetag).view(-1,1)
+        # scale_thetag = torch.exp(-2*torch_pi*(thcosg-torch_pi/2))
+        # scale_thetag = torch.minimum(torch.tensor(1), scale_thetag).view(-1,1)
 
-        clipped_delta_g = scale_thetag * gradients_recov # s1*[v1] \ s2*[v2] \ s3*v3 ...
-        clipped_delta_g = torch.mean(clipped_delta_g, dim = 0)
+        thcosg_std = thcosg.std()
+        if   (thcosg.median() < thcosg.mean()): thcosg_std = thcosg[thcosg<thcosg.median()].std()
+        elif (thcosg.median() > thcosg.mean()): thcosg_std = thcosg[thcosg>thcosg.median()].std()
+        thcosg_std = thcosg_std.nan_to_num(nan=1)
+        scale_thetag = torch.exp(-0.5*torch.square((thcosg-thcosg.median())/thcosg_std))
+        scale_thetag = 1.0 - torch.isclose(scale_thetag,  torch.zeros_like(scale_thetag)).float()
 
-        aggmvec = aggmvec_tminus1 + clipped_delta_g
+
+        print(thcosg.view(1,-1), thcosg_std.view(1,-1))
+        print(scale_thetag)
+
+        test_ang = torch.acos(torch_F.cosine_similarity(  # radians
+                        stacked_wvec, aggmvec_tminus1)).view(-1,1)
+
+        print("TestAng", test_ang)
+
+        # breakpoint()
+
+        # clipped_delta_g = scale_thetag * gradients_recov # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        # clipped_delta_g = torch.sum(clipped_delta_g, dim = 0) / torch.sum(scale_thetag)
+        # aggmvec = aggmvec_tminus1 + clipped_delta_g
+
+        aggmvec = (scale_thetag * outk_mveci).sum(dim=0) / torch.sum(scale_thetag)
 
         agg_state = fedops.set_param_in_state(state_dict_struct, aggmvec.view(-1),
                                                 keys_to_ignore=self.vec_state_ignore)
