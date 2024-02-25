@@ -14,7 +14,8 @@
 
     {
     "byztn_clients": [],
-    "byztn_method" : "ALIEζAttack"
+    "byztn_method" : "ALIEζAttack",
+    "z_max": 1
     },
 
     {
