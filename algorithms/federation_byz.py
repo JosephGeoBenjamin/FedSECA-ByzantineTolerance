@@ -92,7 +92,6 @@ class NoGuardΞByzantine():
         if self.id in byz_clients:
             self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(
                 self.cfg, self.gmodel_init, self.device)
-            print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
 
 
     #-------- Client methods ----------
@@ -167,8 +166,8 @@ class NoGuardΞByzantine():
     def aggregate_globally(self, lsets, device=None): #used at begining of local round central
         """ Return: aggregated stat
         """
-
-        agg_state, select_info = self.aggregator_func(lsets)
+        with torch.no_grad():
+            agg_state, select_info = self.aggregator_func(lsets)
 
         gset = {"model_state": agg_state, "client_select": select_info}
         return gset
@@ -586,15 +585,14 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
         ### Smoothed_Weiszfeld
         v = torch.zeros_like(wvecs[0])
-        with torch.no_grad():
-            for r in range(self.budget_R):
-                l2dist = torch.norm(v - stacked_wvec, dim=1).view(-1,1)
-                betas = alphas / torch.maximum(l2dist, self.nu.to(self.device))
+        for r in range(self.budget_R):
+            l2dist = torch.norm(v - stacked_wvec, dim=1).view(-1,1)
+            betas = alphas / torch.maximum(l2dist, self.nu.to(self.device))
 
-                v = betas * stacked_wvec # b1*[w1] \ b2*[w2] \ b3*[w3] ...
-                v = v.sum(dim=0) / betas.sum(dim=0)
+            v = betas * stacked_wvec # b1*[w1] \ b2*[w2] \ b3*[w3] ...
+            v = v.sum(dim=0) / betas.sum(dim=0)
 
-                betas_list.append(betas.flatten().tolist())
+            betas_list.append(betas.flatten().tolist())
         ###
 
         final_wvec = v.clone()
@@ -771,6 +769,25 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         radian = torch.acos(torch.clamp(sim, -1 + epsilon, 1 - epsilon))
         return radian
 
+    def safe_kldiver(self, vec_ref, vec_comp, epsilon=1e-6):
+
+        ref  = vec_ref.clone()
+        comp = vec_comp.clone()
+        ref [ref >-epsilon] = -epsilon; ref  = torch.abs(ref)
+        comp[comp>-epsilon] = -epsilon; comp = torch.abs(comp)
+        neg_div =ref*(torch.log(ref) - (torch.log(comp)))
+        # del ref; del comp
+
+        ref  = vec_ref.clone()
+        comp = vec_comp.clone()
+        ref [ref <epsilon] = epsilon
+        comp[comp<epsilon] = epsilon
+        pos_div = ref*(torch.log(ref) - (torch.log(comp)))
+        # del ref; del comp
+
+        return (pos_div+neg_div).mean(dim=1)
+
+
     #-----------------
     def __custom_one_aggregate(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
@@ -842,15 +859,11 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
         stacked_wvec = torch.vstack(wvecs)
 
         aggmvec_tminus1 = self.aggmvec_tminus1.clone().view(1, -1)
-        stacked_mveci_tminus1 = self.stacked_mveci_tminus1
 
         torch_pi = torch.tensor(np.pi)
 
-
         stacked_delta = stacked_wvec-aggmvec_tminus1
         stacked_norms = torch.norm(stacked_delta, dim=1).view(-1,1)
-
-        median_norm = stacked_norms.median().view(1)
 
         ## Clientwise reference Clipping
         mi_scales = []
@@ -860,23 +873,25 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
             #TODO: Somehow goodones are selecting bad guys
             inorm = stacked_norms[i].view(1)
             taui = inorm
-            ccdeni = stacked_norms #TODO: check this
+            ccdeni = stacked_norms
 
             taui_by_ccdeni = self.safe_divide(taui, ccdeni, fill=1.0) # this will return 1 for taui by ccdenii
             scale_normi = torch.minimum(torch.tensor(1), taui_by_ccdeni).view(-1,1)
 
-            thccij  = 0 #TODO: Check this xj vs agg_t-1
-            thcosi =  self.safe_radians(stacked_delta[i], stacked_delta).view(-1,1)
+            # thcosi =  self.safe_radians(stacked_delta[i], stacked_delta).view(-1,1)
+            thcosi =  self.safe_kldiver(stacked_delta[i], stacked_delta).view(-1,1)
+            print(thcosi)
 
+            thcosi = torch.cat([thcosi[0:i], thcosi[i+1:]]) ##remove the ith components
             thcosi_std = thcosi.std()
             if   (thcosi.median() < thcosi.mean()): thcosi_std = thcosi[thcosi<thcosi.median()].std()
             elif (thcosi.median() > thcosi.mean()): thcosi_std = thcosi[thcosi>thcosi.median()].std()
             thcosi_std = thcosi_std.nan_to_num(nan=1)
             scale_thetai = torch.exp(-0.5*torch.square((thcosi-thcosi.median())/thcosi_std))
-            scale_thetai = scale_thetai.round(decimals=5)
+            scale_thetai = scale_thetai.round(decimals=6)
             # scale_thetai = 1.0 - torch.isclose(scale_thetai, torch.zeros_like(scale_thetai)).float()
-
-            # breakpoint()
+            scale_thetai = torch.cat([scale_thetai[0:i], torch.zeros_like(scale_thetai[0]).view(1,1), scale_thetai[i:]])
+            scale_thetai = scale_thetai.nan_to_num(nan=0.0)
 
             clipped_delta_mi = scale_normi * scale_thetai * stacked_delta # s1*[v1] \ s2*[v2] \ s3*v3 ...
             clipped_delta_mi[i, :] = 0 # remove i-th client update from momentum_i
@@ -886,33 +901,39 @@ class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
             outk_mveci[i, :] = mveci
             mi_scales.append(scale_normi.flatten().tolist())
             mitheta_scales.append(scale_thetai.flatten().tolist())
-
+        # breakpoint()
         ## Global reference clipping
 
-        # semi_aggmvec = torch.mean(outk_mveci, dim=0)
-        # recov_stacked_wvec = semi_aggmvec - outk_mveci
-        # gradients_recov = recov_stacked_wvec - aggmvec_tminus1
-        # gradients_mveci = outk_mveci         - aggmvec_tminus1
-        # gradients_wvec  = stacked_wvec       - aggmvec_tminus1
+        # thcosg =  self.safe_radians(outk_mveci, aggmvec_tminus1).view(-1,1)
+        thcosg =  self.safe_kldiver(aggmvec_tminus1, outk_mveci).view(-1,1)
+        print(thcosg)
 
-        thcosg =  self.safe_radians(outk_mveci, aggmvec_tminus1).view(-1,1)
-
+        ##type 1
         # scale_thetag = torch.exp(-2*torch_pi*(thcosg-torch_pi/2))
         # scale_thetag = torch.minimum(torch.tensor(1), scale_thetag).view(-1,1)
 
-        thcosg_std = thcosg.std()
-        if   (thcosg.median() < thcosg.mean()): thcosg_std = thcosg[thcosg<thcosg.median()].std()
-        elif (thcosg.median() > thcosg.mean()): thcosg_std = thcosg[thcosg>thcosg.median()].std()
-        thcosg_std = thcosg_std.nan_to_num(nan=1)
-        scale_thetag = torch.exp(-0.5*torch.square((thcosg-thcosg.median())/thcosg_std))
-        scale_thetag = 1.0 - torch.isclose(scale_thetag,  torch.zeros_like(scale_thetag)).float()
+        ##type2
+        # thcosg_std = thcosg.std()
+        # if   (thcosg.median() < thcosg.mean()): thcosg_std = thcosg[thcosg<thcosg.median()].std()
+        # elif (thcosg.median() > thcosg.mean()): thcosg_std = thcosg[thcosg>thcosg.median()].std()
+        # thcosg_std = thcosg_std.nan_to_num(nan=1)
+        # scale_thetag = torch.exp(-0.5*torch.square((thcosg-thcosg.median())/thcosg_std))
+        # scale_thetag = scale_thetag.round(decimals=6)
 
+        ##type3
+        scale_thetag = torch_F.softmin(thcosg/thcosg.sum(), dim=0)
+
+        scale_thetag = scale_thetag.nan_to_num(nan=0.0)
+        # scale_thetag = 1.0 - torch.isclose(scale_thetag,  torch.zeros_like(scale_thetag)).float()
+
+        breakpoint()
         aggmvec = (scale_thetag * outk_mveci).sum(dim=0) / torch.sum(scale_thetag)
 
         agg_state = fedops.set_param_in_state(state_dict_struct, aggmvec.view(-1),
                                                 keys_to_ignore=self.vec_state_ignore)
-        self.aggwvec_tminus1 = aggmvec.clone()
-        self.stacked_mveci_tminus1 = outk_mveci.clone()
+
+        self.aggwvec_tminus1       = aggmvec
+        self.stacked_mveci_tminus1 = outk_mveci
 
         g_scales = scale_thetag.flatten().tolist()
 

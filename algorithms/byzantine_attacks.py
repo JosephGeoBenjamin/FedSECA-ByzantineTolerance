@@ -3,6 +3,7 @@ import copy
 import torch
 import torch.nn.functional as torch_F
 import numpy as np
+import random
 import scipy.stats as spstats
 import algorithms.federation_ops as fedops
 
@@ -124,6 +125,7 @@ class ALIEζAttack():
             cdf_value = (n - m - s) / (n - m)
             self.z_max = spstats.norm.ppf(cdf_value)
 
+        self.z_max = self.z_max + random.random()*0.1
         print("ATTACK: ALIEζAttack", "Z:", self.z_max)
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
