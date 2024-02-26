@@ -204,8 +204,9 @@ def getFedProtocol():
         fedProtocol = fedbyz.NoGuardΞByzantine  #default
         fedProtocol = getattr(fedbyz, CFG.defense_cfg["defense_method"])
 
-        if bool(CFG.center_inclusion_filter):
-            raise Exception("Can't filter datacenters in Byzantine Method;; its a TODO") # remove dependency on CFG.data_centers
+        if CFG.defense_cfg["defense_method"] not in ["NoGuardΞByzantine", "NoGuardΞByzantineDecopl"]:
+            if bool(CFG.center_inclusion_filter):
+                raise Exception("Can't filter datacenters in Byzantine Method;; its a TODO") # remove dependency on CFG.data_centers
 
     else:
         raise Exception("Unknown Method given", CFG.fed_approach)
@@ -257,7 +258,7 @@ class ClsFedHandler(object):
         self.local_scaler = None
         self.local_model  = None # copy undergoing training
         self.gdsyp_model  = None # copy of model received fomr server
-        self.winit_model  = None # copy of starting seed Model
+        # self.winit_model  = None # copy of starting seed Model
         self.agghatch     = None
 
         ## TrainPhase attacks
@@ -277,7 +278,7 @@ class ClsFedHandler(object):
         return_result = {}
 
         if CFG.enable_proxreg:
-            model_prox = copy.deepcopy(self.winit_model) ## --> change to
+            model_prox = copy.deepcopy(self.gdsyp_model) ## --> change to
 
         if VALIDATION: startValidMetric = self.run_validation(model)
         ### --------------
@@ -367,7 +368,7 @@ class ClsFedHandler(object):
 
 
         if ANALYSE_MODELS:
-            model_start = self.winit_model
+            model_start = self.gdsyp_model
             curr_mvec = fedops.get_param_from_state(model.state_dict(), keys_to_ignore=["num_batches_tracked"])
             strt_mvec = fedops.get_param_from_state(model_start.state_dict(), keys_to_ignore=["num_batches_tracked"])
             model_diff_vec = curr_mvec - strt_mvec
@@ -409,7 +410,7 @@ class ClsFedHandler(object):
     def update_parameters(self, model, agghatch=None):
         self.local_model = copy.deepcopy(model).to(self.device)
         self.gdsyp_model = copy.deepcopy(model).to(self.device).eval()
-        if not self.winit_model: self.winit_model = copy.deepcopy(model).to(self.device).eval()
+        # if not self.winit_model: self.winit_model = copy.deepcopy(model).to(self.device).eval()
 
         self.local_optim = optim.AdamW(self.local_model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)

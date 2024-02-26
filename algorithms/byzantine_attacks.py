@@ -22,7 +22,7 @@ Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
 class LabelFlipζAttack():
     def __init__(self, cfg, model_at_start, device="cpu" ):
         # self.model_init = copy.deepcopy(model)
-        print("This is a dummy init; for Training Phase attack")
+        print("This is a dummy init; LabelFlipζAttack for Training Phase attack")
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         return lmodel_state_tth
@@ -33,6 +33,8 @@ class RandomizedζAttack():
         # self.model_init = copy.deepcopy(model)
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
+
+        print("ATTACK: RandomizedζAttack")
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)
@@ -47,6 +49,8 @@ class AffineζAttack():
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.scaler = cfg.byztn_cfg["scale"]
+
+        print("ATTACK: AffineζAttack")
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)
@@ -68,6 +72,8 @@ class FangCraftedζAttack():
         self.lmbd = cfg.byztn_cfg["lambda"] # 0.1 in paper
 
         self.vec_state_ignore = ["num_batches_tracked"]
+
+        print("ATTACK: FangCraftedζAttack")
 
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
@@ -118,6 +124,8 @@ class ALIEζAttack():
             cdf_value = (n - m - s) / (n - m)
             self.z_max = spstats.norm.ppf(cdf_value)
 
+        print("ATTACK: ALIEζAttack", "Z:", self.z_max)
+
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
         # Loop over benign weights
@@ -158,6 +166,8 @@ class XieIPMζAttack():
         ## this is global common start point
         self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
                                     keys_to_ignore=self.vec_state_ignore)
+
+        print("ATTACK: XieIPMζAttack")
 
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
@@ -212,6 +222,8 @@ class MimicζAttack():
         gen = torch.Generator(device=self.device)
         gen.manual_seed(0)
         self.z = torch.rand(self.gwvec_0th.shape, generator=gen, device=self.device)
+
+        print("ATTACK: MimicζAttack")
 
 
     def _warmup_routine(self, curr_good_gradvecs:torch.tensor):
@@ -293,6 +305,7 @@ class OzfaturaROPζAttack():
             cdf_value = (n - m - s) / (n - m)
             self.z_max = spstats.norm.ppf(cdf_value)
 
+        print("ATTACK: OzfaturaROPζAttack", "Z", self.z_max)
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
