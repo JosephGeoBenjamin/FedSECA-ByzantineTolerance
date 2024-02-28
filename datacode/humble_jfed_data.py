@@ -11,6 +11,8 @@ import utilities.logUtils as lutl
 from datacode.augmentations import HumbleAuguments
 
 ##==============================================================================
+#NOTE: No seperate validation codes
+
 
 class MNISTkind_JFedDatset(torch.utils.data.Dataset):
     """For datasets form torch data"""

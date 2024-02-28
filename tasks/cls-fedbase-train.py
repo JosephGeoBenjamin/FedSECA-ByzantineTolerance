@@ -263,7 +263,7 @@ class ClsFedHandler(object):
 
         ## TrainPhase attacks
         self.labelFlip=False
-        if CFG.byztn_cfg.get("byztn_method") == "LabelFlipζAttack":
+        if CFG.byztn_cfg and CFG.byztn_cfg.get("byztn_method") == "LabelFlipζAttack":
             if self.id in CFG.byztn_cfg.get("byztn_clients"):
                 self.labelFlip = True
 
@@ -582,8 +582,8 @@ def simple_main(model_key=None, folder_suffix=""):
                 diff_cos_sim.append(difcos)
                 winit_cos_sim.append(torch_F.cosine_similarity(v1.view(1,-1), wvec_init.view(1,-1)).item())
             dists_dict = {"epoch": itr, "l2norm":l2norm_dist, "cosim": cosine_sim,
-                        "zero_cosim": winit_cos_sim,
-                        "diff_l2norm":diff_l2_norm, "diff_cosim": diff_cos_sim}
+                        "diff_l2norm":diff_l2_norm, "diff_cosim": diff_cos_sim,
+                        "zero_cosim": winit_cos_sim,}
             lutl.LOG2DICTXT(dists_dict, CFG.gLogPath +'/trainAnsys-weight-simMatrix.txt', console=False)
 
             cselect_dict = global_aggset.get("client_select")

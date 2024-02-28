@@ -57,6 +57,7 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
                         center= center_index,
                         split_type = split_type,
                         dirichlet_alpha = cfg.dirichlet_alpha,
+                        iid_ness = cfg.iid_ness,
                         total_centers=cfg.data_centers_count,
                         transforms=CifarClassifyAuguments(method="infer",
                                                         image_size=img_size_in))
