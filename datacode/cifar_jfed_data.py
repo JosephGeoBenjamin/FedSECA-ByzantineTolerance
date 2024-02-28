@@ -19,24 +19,31 @@ from utilities.metricUtils import get_class_weights
 
 ## ======================== Dataset Class ======================================
 
-class Cifar100_JFedDataset(torch.utils.data.Dataset):
+class Cifar_JFedDataset(torch.utils.data.Dataset):
     def __init__(
         self, data_path: str = None, #path to dataset images
+        dataset_type: str = None, #cifar10 or cifar100
         csv_name = None, # for some special data partitioning
         center = "all",  # all--> Pooled
         split_type: str = "cls_train", # cls_train / cls_valid / test
         total_centers = 10,
-        dirichlet_alpha = 1000,
+        dirichlet_alpha = 100,
         iid_ness = "full",         # full / semi-mix / semi-pure / non
         semi_client_per_class = 2, # only for semi iid_ness
-        label_type = "fine_label", # fine_label->100 / coarse_label->20
+        label_type = "fine_label", # fine_label->100 / coarse_label->20 / label->10
         transforms=None,
     ):
+        print(f"CIFAR Dataset Class for :: >> {dataset_type}")
 
-        # cls_csv = csv_name if csv_name else  "cifar100_clsfy_data.csv"
-        cls_csv = csv_name if csv_name else  "cifar100_train_data.csv"
-        ssl_csv = csv_name if csv_name else  "cifar100_ssl_data.csv"
-        test_csv = csv_name if csv_name else "cifar100_test_data.csv"
+        if dataset_type == "cifar10":
+            assert (label_type == "label")
+        if dataset_type == "cifar100":
+            assert (label_type in ["fine_label", "coarse_label"])
+
+        # cls_csv = csv_name if csv_name else "cifar100_clsfy_data.csv"
+        ssl_csv  = csv_name if csv_name else f"{dataset_type}_ssl_data.csv"
+        test_csv = csv_name if csv_name else f"{dataset_type}_test_data.csv"
+        cls_csv  = csv_name if csv_name else f"{dataset_type}_train_data.csv"
 
         if data_path:
             if not (os.path.exists(data_path)):
@@ -207,12 +214,13 @@ class Cifar100_JFedDataset(torch.utils.data.Dataset):
 ###=================== Getter Functions ========================================
 
 
-def getCifar100CLSLoaders(cfg, center_index = None, override_csv = None):
+def getCifarCLSLoaders(cfg, center_index = None, override_csv = None):
     """ center_index: None/all --> pooled
     """
     if center_index == None: center_index = "all"
 
     data_path     = cfg.data_root_path
+    dataset_type  = cfg.dataset_type
     info_log_path = cfg.gLogPath +'/misc_data.txt'
     img_size_in   = cfg.image_size
     batch_size    = cfg.batch_size
@@ -224,14 +232,16 @@ def getCifar100CLSLoaders(cfg, center_index = None, override_csv = None):
     override_csv = cfg.override_csv if cfg.override_csv else None
 
 
-    traindataset = Cifar100_JFedDataset( data_path= data_path, csv_name=override_csv,
+    traindataset = Cifar_JFedDataset( data_path= data_path, csv_name=override_csv,
+                    dataset_type=dataset_type,
                     center= center_index, split_type = "cls_train",
                     dirichlet_alpha = alpha, iid_ness=iid_ness,
                     total_centers=total_centers,
                     transforms=CifarClassifyAuguments(method="train",
                                                       image_size=img_size_in))
 
-    validdataset = Cifar100_JFedDataset( data_path= data_path, csv_name=override_csv,
+    validdataset = Cifar_JFedDataset( data_path= data_path, csv_name=override_csv,
+                    dataset_type=dataset_type,
                     center= center_index, split_type = "cls_valid",
                     dirichlet_alpha = alpha,  iid_ness=iid_ness,
                     total_centers=total_centers,
@@ -266,18 +276,20 @@ def getCifar100CLSLoaders(cfg, center_index = None, override_csv = None):
 
 
 
-def getCifar100TESTLoader(cfg, center_index = None):
+def getCifarTESTLoader(cfg, center_index = None):
     """ center_index: None/all --> pooled
     """
     if center_index == None: center_index = "all"
 
-    data_path = cfg.data_root_path
+    data_path     = cfg.data_root_path
+    dataset_type  = cfg.dataset_type
     info_log_path = cfg.gLogPath +'/misc_data.txt'
     img_size_in   = cfg.image_size
-    batch_size = cfg.batch_size
-    workers    = cfg.workers
+    batch_size    = cfg.batch_size
+    workers       = cfg.workers
 
-    dataset = Cifar100_JFedDataset( data_path= data_path,
+    dataset = Cifar_JFedDataset( data_path= data_path,
+                    dataset_type=dataset_type,
                     center= center_index, split_type = "test",
                     transforms=CifarClassifyAuguments(method="infer",
                                                       image_size=img_size_in))
@@ -295,12 +307,13 @@ def getCifar100TESTLoader(cfg, center_index = None):
 
 
 
-def getCifar100SSLLoader(cfg, center_index = None, ssl_transforms=None):
+def getCifarSSLLoader(cfg, center_index = None, ssl_transforms=None):
     """ center_index: None/all --> pooled
     """
     if center_index == None: center_index = "all"
 
     data_path     = cfg.data_root_path
+    dataset_type  = cfg.dataset_type
     info_log_path = cfg.gLogPath +'/misc_data.txt'
     batch_size    = cfg.batch_size
     img_size_in   = cfg.image_size
@@ -309,7 +322,8 @@ def getCifar100SSLLoader(cfg, center_index = None, ssl_transforms=None):
     iid_ness      = cfg.iid_ness
     total_centers = cfg.data_centers_count
 
-    dataset = Cifar100_JFedDataset( data_path= data_path,
+    dataset = Cifar_JFedDataset( data_path= data_path,
+                    dataset_type=dataset_type,
                     center= center_index, split_type = "ssl_train",
                     dirichlet_alpha = alpha,  iid_ness=iid_ness,
                     total_centers=total_centers,
@@ -332,7 +346,8 @@ def getCifar100SSLLoader(cfg, center_index = None, ssl_transforms=None):
 
 if __name__ == "__main__":
 
-    dataset = Cifar100_JFedDataset( data_path="/home/joseph.benjamin/WERK/fed-cvpr/data/cifar100-jfed",
+    dataset = Cifar_JFedDataset( data_path="/home/joseph.benjamin/WERK/fed-cvpr/data/cifar100-jfed",
+                                  dataset_type="cifar100",
                                   center=5, split_type="cls_train",
                                   transforms=None)
     for i in range(10):

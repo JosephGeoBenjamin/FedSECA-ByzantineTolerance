@@ -49,7 +49,7 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
 
     elif cfg.dataset == "CIFAR100":
         from datacode.augmentations import CifarClassifyAuguments
-        from datacode.cifar100_jfed_data import Cifar100_JFedDataset
+        from datacode.cifar_jfed_data import Cifar100_JFedDataset
         img_size_in   = cfg.image_size
 
         traindataset = Cifar100_JFedDataset( data_path= cfg.data_path,
