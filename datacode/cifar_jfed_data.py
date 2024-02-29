@@ -88,6 +88,7 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
             elif (iid_ness is not None) and (iid_ness is not False):
                 print("Using Manual IIDNESS labelwise Split !!!")
                 df2 = self._split_based_on_iidness(df2)
+                if not len(df2): print("Ignoring Empty data partition ..... &&&&&&")
             else:
                 print("Defaulting to very random Split !!!")
                 state = np.random.get_state(); np.random.seed(100)
@@ -102,7 +103,6 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
 
 
     def group_dataitem_by_class(self, data_list):
-
         sorted_tuples = sorted(data_list, key=lambda x: x[-1])
         n = max(sorted_tuples, key=lambda x: x[-1])[-1]+1
 
@@ -113,8 +113,9 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
 
 
     def _split_based_on_iidness(self, df):
-        client_dataset = []
+        if len(df) == 0: return df # for validation ignoring
 
+        client_dataset = []
         tuple_data =  df[['filename', 'image_id', self.label_type]].to_records(index=False)
         grouped_data = self.group_dataitem_by_class(tuple_data)
 
@@ -221,6 +222,7 @@ def getCifarCLSLoaders(cfg, center_index = None, override_csv = None):
 
     data_path     = cfg.data_root_path
     dataset_type  = cfg.dataset_type
+    label_type    = cfg.label_type
     info_log_path = cfg.gLogPath +'/misc_data.txt'
     img_size_in   = cfg.image_size
     batch_size    = cfg.batch_size
@@ -237,6 +239,7 @@ def getCifarCLSLoaders(cfg, center_index = None, override_csv = None):
                     center= center_index, split_type = "cls_train",
                     dirichlet_alpha = alpha, iid_ness=iid_ness,
                     total_centers=total_centers,
+                    label_type=label_type,
                     transforms=CifarClassifyAuguments(method="train",
                                                       image_size=img_size_in))
 
@@ -245,6 +248,7 @@ def getCifarCLSLoaders(cfg, center_index = None, override_csv = None):
                     center= center_index, split_type = "cls_valid",
                     dirichlet_alpha = alpha,  iid_ness=iid_ness,
                     total_centers=total_centers,
+                    label_type=label_type,
                     transforms=CifarClassifyAuguments(method="infer",
                                                       image_size=img_size_in))
 
@@ -283,6 +287,7 @@ def getCifarTESTLoader(cfg, center_index = None):
 
     data_path     = cfg.data_root_path
     dataset_type  = cfg.dataset_type
+    label_type    = cfg.label_type
     info_log_path = cfg.gLogPath +'/misc_data.txt'
     img_size_in   = cfg.image_size
     batch_size    = cfg.batch_size
@@ -291,6 +296,7 @@ def getCifarTESTLoader(cfg, center_index = None):
     dataset = Cifar_JFedDataset( data_path= data_path,
                     dataset_type=dataset_type,
                     center= center_index, split_type = "test",
+                    label_type=label_type,
                     transforms=CifarClassifyAuguments(method="infer",
                                                       image_size=img_size_in))
 
@@ -314,6 +320,7 @@ def getCifarSSLLoader(cfg, center_index = None, ssl_transforms=None):
 
     data_path     = cfg.data_root_path
     dataset_type  = cfg.dataset_type
+    label_type    = cfg.label_type
     info_log_path = cfg.gLogPath +'/misc_data.txt'
     batch_size    = cfg.batch_size
     img_size_in   = cfg.image_size
@@ -327,6 +334,7 @@ def getCifarSSLLoader(cfg, center_index = None, ssl_transforms=None):
                     center= center_index, split_type = "ssl_train",
                     dirichlet_alpha = alpha,  iid_ness=iid_ness,
                     total_centers=total_centers,
+                    label_type=label_type,
                     transforms=ssl_transforms)
 
     loader  = torch.utils.data.DataLoader(dataset, shuffle=True,

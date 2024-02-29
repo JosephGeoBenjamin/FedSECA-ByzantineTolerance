@@ -775,15 +775,30 @@ if __name__ == '__main__':
     def iided_vs_simple_wrap(xtitle=""):
         """For running different alephs/iidness in cifar100 or mnists"""
 
+        default_partition_type = "iid" # aleph / iid
+
+
         if CFG.dataset == "CIFAR":
             if CFG.dirichlet_alpha is False:
                 quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
             else: quantity = [CFG.dirichlet_alpha]
 
-            for q in quantity:
-                CFG.dirichlet_alpha = q   #~~~~
-                qtitle = xtitle + f"/{q}_aleph/"
-                train_runner(folder_suffix=qtitle)
+            if CFG.iid_ness is False:
+                quantity = ["full", "semi-mix", "semi-pure", "non"]                                   #==> Set as needed
+            else: quantity = [CFG.iid_ness]
+
+            if default_partition_type=="aleph":
+                for q in quantity:
+                    CFG.dirichlet_alpha = q   #~~~~
+                    qtitle = xtitle + f"/{q}_aleph/"
+                    train_runner(folder_suffix=qtitle)
+
+            if default_partition_type=="iid":
+                for q in quantity:
+                    CFG.iid_ness = q     #~~~~
+                    qtitle = xtitle + f"/{q}_iid/"
+                    train_runner(folder_suffix=qtitle)
+
 
         elif CFG.dataset == "HUMBLE":
             quantity = ["full", "semi-mix", "semi-pure", "non"]
@@ -798,18 +813,18 @@ if __name__ == '__main__':
 
     ##-----
 
-    def sketch_compressions_wrap():
+    # def sketch_compressions_wrap():
 
-        ## HASHes set at 12
-        compressions = {"1.5E": 8, #expand                                      #==> Set as needed
-                        "2x": 24, "4x": 48, "8x": 96, "16x":198
-                        }
+    #     ## HASHes set at 12
+    #     compressions = {"1.5E": 8, #expand                                      #==> Set as needed
+    #                     "2x": 24, "4x": 48, "8x": 96, "16x":198
+    #                     }
 
-        for cx, sx in compressions.items():
-            CFG.sketch_compress_factor = sx  #~~~~
-            xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
-            print(xtitle)
-            iided_vs_simple_wrap(xtitle)
+    #     for cx, sx in compressions.items():
+    #         CFG.sketch_compress_factor = sx  #~~~~
+    #         xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
+    #         print(xtitle)
+    #         iided_vs_simple_wrap(xtitle)
 
     ###----------------------------------
 

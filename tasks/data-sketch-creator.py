@@ -29,7 +29,7 @@ from sketching.sinkhorn_metric import sinkhorn_pointcloud_pytorch
 
 CFG = rutl.ObjDict(
     cloud_point_count = 1000,
-    checkpoint_dir= "hypotheses/DataSketchColl/ISIC-main-002/1K-pts/",
+    checkpoint_dir= "hypotheses/DataSketchColl/Cifar10-main-002/1K-pts/",
 )
 
 ### ----------------------------------------------------------------------------
@@ -47,17 +47,18 @@ def getAdataloader(cfg, center_index, split_type="cls_train"):
                         transforms=IsicClassifyAuguments(method="infer",
                                                          image_size=img_size_in))
 
-    elif cfg.dataset == "CIFAR100":
+    elif cfg.dataset == "CIFAR":
         from datacode.augmentations import CifarClassifyAuguments
-        from datacode.cifar_jfed_data import Cifar100_JFedDataset
+        from datacode.cifar_jfed_data import Cifar_JFedDataset
         img_size_in   = cfg.image_size
-
-        traindataset = Cifar100_JFedDataset( data_path= cfg.data_path,
-                        csv_name="cifar100_Full_Train_data.csv",
-                        center= center_index,
+        traindataset = Cifar_JFedDataset( data_path= cfg.data_path,
+                        csv_name = cfg.csv_name,
+                        dataset_type = cfg.dataset_type,
+                        center = center_index,
                         split_type = split_type,
                         dirichlet_alpha = cfg.dirichlet_alpha,
                         iid_ness = cfg.iid_ness,
+                        label_type = cfg.label_type,
                         total_centers=cfg.data_centers_count,
                         transforms=CifarClassifyAuguments(method="infer",
                                                         image_size=img_size_in))
@@ -482,7 +483,7 @@ def data_sketch_main(cfg, file_suffix=""):
             cfg.weight_path = f"{cfg.weight_root_path}/center_{center_index}/weights/bestmodel.pth"
 
             # all center in below cases won't be in the iided split  >>>
-            if (CFG.dataset in ["CIFAR100", "HUMBLE"]) and (center_index == "all"):
+            if (CFG.dataset in ["CIFAR", "HUMBLE"]) and (center_index == "all"):
                 last_dir = list(filter(None, cfg.weight_root_path.split("/")))[-1]
                 cfg.weight_path = f"{cfg.weight_root_path.replace(last_dir, '')}/center_{center_index}/weights/bestmodel.pth"
 
@@ -516,16 +517,28 @@ def data_sketch_main(cfg, file_suffix=""):
 
 
 
-def run_for_cifar100():
-    CFG.dataset   = "CIFAR100"
+def run_for_cifar(type_=10):
+    CFG.dataset   = "CIFAR"
 
-    weight_root_path = "/home/joseph.benjamin/WERK/fed-cvpr/fed-sketch/hypotheses/Cls1-cifar/Ex00-Cls-base_IID-002/"
+    if type_ == 100:
+        weight_root_path = "/home/joseph.benjamin/WERK/fed-cvpr/fed-sketch/hypotheses/Cls1-cifar/Ex00-Cls-base_IID-002/"
+        CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar100-jfed/"
+        CFG.csv_name = "cifar100_train_data.csv"
+        CFG.data_centers_count = 10
+        CFG.image_size = 224
+        CFG.dataset_type = "cifar100"
+        CFG.label_type = "fine_label"
 
-    CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar100-jfed/"
-    CFG.data_centers_count = 10
-    CFG.image_size = 224
+    if type_ == 10:
+        weight_root_path = "/home/joseph.benjamin/WERK/fed-cvpr/fed-sketch/hypotheses/Cls2-cifar10/Ex00-Cls-base_IID-001/"
+        CFG.data_path = "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar10-jfed/"
+        CFG.csv_name = "cifar10_train_data.csv"
+        CFG.data_centers_count = 5
+        CFG.image_size = 224
+        CFG.dataset_type = "cifar10"
+        CFG.label_type = "label"
 
-    # for alp in [1000, 100, 10, 1, 0]:  #0.5]
+    # for alp in [100, 10, 1, 0]:  # 1000, 0.5]
     #         CFG.dirichlet_alpha = alp
     #         if weight_root_path:
     #             CFG.weight_root_path = f"{weight_root_path}/{alp}_aleph/"
@@ -596,8 +609,8 @@ if __name__ == '__main__':
     # CFG.sketch_method = "imagepix-RaceSketch"
 
     # run_for_mnist()
-    # run_for_cifar100()
-    run_for_isicflamby()
+    run_for_cifar(10)
+    # run_for_isicflamby()
     # run_for_organmnist()
 
 
