@@ -74,7 +74,8 @@ class FangCraftedζAttack():
 
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        print("ATTACK: FangCraftedζAttack")
+        self.lmbd = self.lmbd + (random.random()-0.5)*0.1
+        print("ATTACK: FangCraftedζAttack", "Lambda", self.lmbd)
 
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
@@ -125,7 +126,7 @@ class ALIEζAttack():
             cdf_value = (n - m - s) / (n - m)
             self.z_max = spstats.norm.ppf(cdf_value)
 
-        self.z_max = self.z_max + random.random()*0.1
+        self.z_max = self.z_max + (random.random()-0.5)*0.1
         print("ATTACK: ALIEζAttack", "Z:", self.z_max)
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
@@ -169,6 +170,7 @@ class XieIPMζAttack():
         self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
                                     keys_to_ignore=self.vec_state_ignore)
 
+        self.epsilon = self.epsilon + (random.random()-0.5)*0.1
         print("ATTACK: XieIPMζAttack")
 
 
@@ -307,6 +309,7 @@ class OzfaturaROPζAttack():
             cdf_value = (n - m - s) / (n - m)
             self.z_max = spstats.norm.ppf(cdf_value)
 
+        self.z_max = self.z_max + (random.random()-0.5)*0.1
         print("ATTACK: OzfaturaROPζAttack", "Z", self.z_max)
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
