@@ -787,26 +787,26 @@ if __name__ == '__main__':
     def iided_vs_simple_wrap(xtitle=""):
         """For running different alephs/iidness in cifar100 or mnists"""
 
-        default_partition_type = "iid" # aleph / iid
+        default_partition_type = "aleph" # aleph / iid
 
 
         if CFG.dataset == "CIFAR":
             if CFG.dirichlet_alpha is False:
-                quantity = [ 1000, 0, 100, 1, 10]                                    #==> Set as needed
-            else: quantity = [CFG.dirichlet_alpha]
+                dquantity = [ 100, 1, 0]                                    #==> Set as needed
+            else: dquantity = [CFG.dirichlet_alpha]
 
             if CFG.iid_ness is False:
-                quantity = ["full", "semi-mix", "semi-pure", "non"]                                   #==> Set as needed
-            else: quantity = [CFG.iid_ness]
+                iquantity = ["full", "semi-mix", "semi-pure", "non"]                                   #==> Set as needed
+            else: iquantity = [CFG.iid_ness]
 
             if default_partition_type=="aleph":
-                for q in quantity:
+                for q in dquantity:
                     CFG.dirichlet_alpha = q   #~~~~
                     qtitle = xtitle + f"/{q}_aleph/"
                     train_runner(folder_suffix=qtitle)
 
             if default_partition_type=="iid":
-                for q in quantity:
+                for q in iquantity:
                     CFG.iid_ness = q     #~~~~
                     qtitle = xtitle + f"/{q}_iid/"
                     train_runner(folder_suffix=qtitle)
