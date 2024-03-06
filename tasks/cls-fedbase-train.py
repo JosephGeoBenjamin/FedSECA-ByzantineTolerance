@@ -84,6 +84,13 @@ parser = argparse.ArgumentParser(description='Classification task')
 parser.add_argument('--load-json', type=str, metavar='JSON',
     help='Load settings from file in json format which override values hard codes in py file.')
 
+parser.add_argument('--attack-json', type=str, metavar='JSON',
+    help='Load Attack setting which overrides prior values')
+
+parser.add_argument('--defense-json', type=str, metavar='JSON',
+    help='Load Defense setting which overrides prior values')
+
+
 parser.add_argument('--seed', type=int, metavar='Int',
     help='Seed to be set for training')
 
@@ -96,10 +103,15 @@ parser.add_argument('--checkpoint-dir', type=str, metavar='PATH',
 
 args = parser.parse_args()
 
-## update keys from json
-if args.load_json:
-    with open(args.load_json, 'rt') as f:
+def load_json_to_CFG(json_file):
+    with open(json_file, 'rt') as f:
         CFG.__dict__.update(json.load(f))
+
+## update keys from json
+if args.load_json: load_json_to_CFG(args.load_json)
+if args.attack_json: load_json_to_CFG(args.attack_json)
+if args.defense_json: load_json_to_CFG(args.defense_json)
+
 
 ## override json variables with CLI if any
 for arg in vars(args):
@@ -780,7 +792,7 @@ if __name__ == '__main__':
 
         if CFG.dataset == "CIFAR":
             if CFG.dirichlet_alpha is False:
-                quantity = [ 1000, 0, 100, 1, 10]                                   #==> Set as needed
+                quantity = [ 1000, 0, 100, 1, 10]                                    #==> Set as needed
             else: quantity = [CFG.dirichlet_alpha]
 
             if CFG.iid_ness is False:
