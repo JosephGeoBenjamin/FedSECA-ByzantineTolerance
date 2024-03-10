@@ -311,7 +311,7 @@ class ClsFedHandler(object):
             tgt = tgt.to(self.device, non_blocking=True)
             if img.shape[0] < 2: continue # fix last batch size being 1 issue
 
-            if self.labelFlip: tgt = self.num_class - tgt -1; print("LF")
+            if self.labelFlip: tgt = self.num_class - tgt -1; #print("LF")
 
             optimizer.zero_grad()
             # with torch.cuda.amp.autocast():

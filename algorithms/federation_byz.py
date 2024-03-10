@@ -355,7 +355,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
 
         all_dist = []
         for v in wvecs:
-            all_dist.append(torch.norm(stacked_wvec-v, dim=1).view(K,1))
+            all_dist.append(torch.norm(stacked_wvec-v, dim=1).view(1,K))
 
         neighbor_dist_sum = []
         for dist in all_dist:

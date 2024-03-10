@@ -65,7 +65,7 @@
 
     {
     "defense_method" : "CoordinateWiseCentralityΞByzantine",
-    "approch"        : "trimmedmean",
+    "approach"        : "trimmedmean",
     "cwtm_beta"      : 2,
     "1_approch"      : "median"
     },
