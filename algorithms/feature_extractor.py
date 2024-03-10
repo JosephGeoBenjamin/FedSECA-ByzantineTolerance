@@ -5,6 +5,20 @@ from torch import nn
 
 from torchvision.models.resnet import BasicBlock, ResNet
 
+class ImageLayerNorm(nn.LayerNorm):
+    def __init__(self, plane, **kwargs):
+        super().__init__(plane)
+        self.ln_forward = super().forward
+
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1).contiguous() # (N, C, H, W) -> (N, H, W, C)
+        x = self.ln_forward(x)
+        x = x.permute(0, 3, 1, 2).contiguous() # (N, H, W, C) -> (N, C, H, W)
+
+        return x
+
+
+
 def freeze_weights(model):
     print("Freezing Resnet weights ...")
     for param in model.parameters():
@@ -59,13 +73,20 @@ def load_ResnetBackbone(arch, torch_pretrain= None, freeze= False):
 
     ## Model loading
     if arch == 'resnet18':
-        backbone = torchvision.models.resnet18(zero_init_residual=True,
-                            weights=torch_pretrain, norm_layer = norm_layer)
+        backbone = torchvision.models.resnet18(norm_layer = norm_layer)
+        bk_state = torchvision.models.resnet18(zero_init_residual=True,
+                                    weights=torch_pretrain).state_dict()
+        backbone.load_state_dict(bk_state, strict=False)
+
+        weights=torch_pretrain
         outfeat_size = 512
 
     elif arch == 'resnet50':
-        backbone = torchvision.models.resnet50(zero_init_residual=True,
-                            weights=torch_pretrain, norm_layer= norm_layer)
+        backbone = torchvision.models.resnet50(norm_layer= norm_layer)
+        bk_state = torchvision.models.resnet50(zero_init_residual=True,
+                            weights=torch_pretrain)
+        backbone.load_state_dict(bk_state, strict=False)
+
         outfeat_size = 2048
 
     elif arch == 'resnet9':
