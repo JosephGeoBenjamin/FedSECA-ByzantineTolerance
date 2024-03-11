@@ -139,10 +139,17 @@ class ALIEζAttack():
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
 
-        mu = torch.mean(benign_wvec, dim=0)
-        std = torch.std(benign_wvec, dim=0)
+        gwvec_tminus1 = fedops.get_param_from_state(
+                    gmodel_state_tminus1,
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
-        attack_wvec = mu - std * self.z_max
+        benign_grads = gwvec_tminus1 - benign_wvec   ## ΔW
+
+        mu = torch.mean(benign_grads, dim=0)
+        std = torch.std(benign_grads, dim=0)
+        attack_grad = mu - std * self.z_max
+
+        attack_wvec = gwvec_tminus1 - attack_grad # W - ΔW
 
         out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
                                     keys_to_ignore=self.vec_state_ignore)

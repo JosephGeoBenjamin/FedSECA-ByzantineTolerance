@@ -426,6 +426,9 @@ class ClsFedHandler(object):
 
         self.local_optim = optim.AdamW(self.local_model.parameters(), lr=CFG.learning_rate,
                             weight_decay=CFG.weight_decay)
+        # self.local_optim = optim.SGD(self.local_model.parameters(), lr=CFG.learning_rate,
+        #                              momentum=0, dampening=0, weight_decay=0 )
+
         self.local_scaler = torch.cuda.amp.GradScaler() # for mixed precision
 
         self.local_scheduler = None
