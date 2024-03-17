@@ -194,8 +194,9 @@ class XieIPMζAttack():
         gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
                                     keys_to_ignore=self.vec_state_ignore)
 
-        delta_wvec = benign_wvec - gwvec_tminus1
-        attack_wvec = gwvec_tminus1 - self.epsilon * (torch.mean(delta_wvec, dim=0))
+        delta_wvec = gwvec_tminus1 - benign_wvec # ΔW
+        # Wt = Wt-1 - ε(-ΔW)
+        attack_wvec = gwvec_tminus1 + self.epsilon * (torch.mean(delta_wvec, dim=0))
 
         out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
                                     keys_to_ignore=self.vec_state_ignore)

@@ -623,6 +623,8 @@ class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
 
         self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
         if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
+        self.tau = self.defense_cfg.get("clip_radius")
+
 
         self.aggregator_func = self.__custom_aggregate
 
@@ -646,8 +648,8 @@ class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
 
 
     def get_tau(self):
-        beta = 0.9
-        return torch.tensor(500).view(1).to(self.device)
+        tau = self.tau
+        return torch.tensor(tau, dtype=float).view(1).to(self.device)
 
 
     #-------- Server methods ----------
