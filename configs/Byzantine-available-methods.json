@@ -21,7 +21,7 @@
     {
     "byztn_clients": [],
     "byztn_method" : "XieIPMζAttack",
-    "epsilon": 0.1
+    "epsilon": 1.3
     },
 
     {
@@ -34,8 +34,9 @@
     "byztn_clients": [],
     "byztn_method" : "OzfaturaROPζAttack",
     "pi_angle": 90 ,
-    "rho_reloc": 1 ,
-    "lambda_refwt": 0.9
+    "rho_reloc": 0.5 ,
+    "lambda_refwt": 0.5,
+    "z_max":1
     },
 
     {
@@ -75,6 +76,14 @@
     "stability_nu"   : 1e-6,
     "budget_iter_r"  : 3
     },
+
+    {
+        "defense_method" : "ClippingBucketingΞByzantine",
+        "clip_radius"  : 400,
+        "clip_iters"   : 3,
+        "bucketing"  : false
+    },
+
 
     {
     "defense_method"  : "NewTauLambdaΞByzantine",
