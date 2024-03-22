@@ -443,7 +443,7 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
 
         elif self.approach == "trimmedmean":
 
-            # median_wvec = torch.tensor(0.0) ## to disable median centring
+            # median_wvec = self.aggwvec_tminus ## to change median centring to wvec_tminus
             beta = self.cwtm_beta
             delta_wvec = stacked_wvec-median_wvec
             sorted_dwvec, _ = torch.sort(delta_wvec, dim=0)
@@ -605,7 +605,10 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
 ##==============================================================================
 
-class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
+class ClippingΞByzantine(NoGuardΞByzantine):
+    """
+    reference: Karimireddy et al. "Learning from history for byzantine robust optimization." ICML2021
+    """
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -623,10 +626,9 @@ class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
 
         self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
         if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
-        self.tau = self.defense_cfg.get("clip_radius")
+        self.radius_estimate = self.defense_cfg.get("clip_radius")
 
-
-        self.aggregator_func = self.__custom_aggregate
+        self.aggregator_func = self.__clipping_aggregate
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
@@ -643,13 +645,15 @@ class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
     def init_stacked_wvecs(self, model):
         wvec = fedops.get_param_from_state(model.state_dict(),
                         keys_to_ignore=self.vec_state_ignore)
-        self.wvec_init = wvec.clone()
-        self.aggwvec_tminus1 = wvec.clone()
+        self.aggwvec_tminus1 = wvec
+        self.mom_deltawvec = torch.zeros_like(wvec)
 
 
     def get_tau(self):
-        tau = self.tau
-        return torch.tensor(tau, dtype=float).view(1).to(self.device)
+        dtype_ = self.aggwvec_tminus1.dtype
+
+        tau = self.radius_estimate
+        return torch.tensor(tau, dtype=dtype_).view(1).to(self.device)
 
 
     #-------- Server methods ----------
@@ -664,42 +668,53 @@ class ClippingBucketingΞByzantine(NoGuardΞByzantine): # Attempt 2
         res[mask] = torch.div(nu_, de[mask])
         return res
 
-    def __custom_aggregate(self, lsets):
+    def clipping_operation(self, x, v, tau, c_iter=1):
+        """
+        x : vectors   :shp:[K, len_parameters]
+        v : reference estimate vector   :shp:[1, len_parameters]
+        tau: clipping radius
+        """
+        rad_info = []
+        for i in range(c_iter):
+            stacked_gdelta = torch.norm(x-v, dim=1).view(-1, 1) #
+
+            tau_by_ccden = self.safe_divide(tau, stacked_gdelta, fill=0.0) ## just setting clipping radius for zero norm
+            rad_comp = torch.minimum(torch.tensor(1), tau_by_ccden).view(-1,1)
+
+            clipped_delta = rad_comp * (x - v) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+            clipped_aggdelta = torch.mean(clipped_delta, dim = 0)
+            v = v + clipped_aggdelta
+
+            rad_info.append(rad_comp.flatten().tolist())
+
+        return v, rad_info
+
+
+    def __clipping_aggregate(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
 
         #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore=self.vec_state_ignore)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
-        stacked_deltawvec = torch.zeros_like(stacked_wvec)
-
-        K = len(lsets)
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
 
         tau = self.get_tau()
 
-        momentum = self.aggwvec_tminus1.clone()
-
         ## Clipping
-        for m in range(self.clip_iters):
-            stacked_gdelta = torch.norm(stacked_wvec-momentum, dim=1).view(-1, 1) #
+        self.mom_deltawvec, rad_info = self.clipping_operation(stacked_deltawvec,
+                                                     self.mom_deltawvec,
+                                                     tau, self.clip_iters)
 
-            tau_by_ccden = self.safe_divide(tau, stacked_gdelta, fill=0.0) ## just setting clipping radius for zero norm
-            rad_comp = torch.minimum(torch.tensor(1), tau_by_ccden).view(-1,1)
-
-            clipped_deltawvec = rad_comp * (stacked_wvec - momentum) # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            clipped_aggdelta = torch.mean(clipped_deltawvec, dim = 0)
-
-            momentum = momentum + clipped_aggdelta
-
-
-        agg_state = fedops.set_param_in_state(state_dict_struct, momentum,
+        new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
-        self.aggwvec_tminus1 = momentum.clone()
+        self.aggwvec_tminus1 = new_wvec.clone()
 
-        rad_scales = rad_comp.flatten().tolist()
-        info_dict = {"client_clip_weightage":rad_scales}
+        info_dict = {"client_clip_weightage":rad_info}
 
         return agg_state, info_dict
 

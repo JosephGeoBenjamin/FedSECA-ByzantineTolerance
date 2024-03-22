@@ -27,7 +27,7 @@
     {
     "byztn_clients": [],
     "byztn_method" : "MimicζAttack",
-    "warmup_steps": 15
+    "warmup_steps": 5
     },
 
     {
@@ -78,10 +78,16 @@
     },
 
     {
-        "defense_method" : "ClippingBucketingΞByzantine",
-        "clip_radius"  : 400,
-        "clip_iters"   : 3,
-        "bucketing"  : false
+        "defense_method" : "ClippingΞByzantine",
+        "clip_radius"  : 100,
+        "clip_iters"   : 3
+    },
+
+    {
+        "defense_method" : "RandomBucketingΞByzantine",
+        "clip_radius"    : 100,
+        "clip_iters"     : 3,
+        "bucket_size_s"  : 2
     },
 
 
