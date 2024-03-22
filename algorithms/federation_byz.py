@@ -636,7 +636,7 @@ class ClippingΞByzantine(NoGuardΞByzantine):
         if self.id == "G": #large tensors, so why waste mem
             self.init_stacked_wvecs(model)
 
-        print("Defense: Clipping Bucketing")
+        print("Defense: Clipping")
 
         if len(self.byztn_cfg) != 0:
             self._init_byzantiness()
@@ -731,6 +731,7 @@ class RandomBucketingΞByzantine(ClippingΞByzantine):
 
         self.aggregator_func = self.__random_bucket_aggregate
 
+        print(" WITH RandomBucketing ")
 
     def _random_subsets(self, indices, subset_size):
         indices = random.sample(indices, len(indices))
@@ -757,7 +758,7 @@ class RandomBucketingΞByzantine(ClippingΞByzantine):
         grps = self._random_subsets(list(range(K)), self.bucket_size)
         bucketed_list = []
         for gp in grps:
-            bucket_mean = stacked_deltawvec[gp,:].mean(dim=0)
+            bucket_mean = stacked_deltawvec[gp,:].mean(dim=0).view(1,-1)
             bucketed_list.append(bucket_mean)
         bucketed_deltawvec = torch.vstack(bucketed_list);    del bucketed_list
 
@@ -776,7 +777,71 @@ class RandomBucketingΞByzantine(ClippingΞByzantine):
 
         return agg_state, info_dict
 
+class SequentialBucketingΞByzantine(ClippingΞByzantine):
+    """
+    reference: Ozfatura et al. Byzantines can also Learn from History: Fall of Centered Clipping in Federated Learning
+    """
+    def __init__(self, cfg, id, model, device="cpu"):
+        super().__init__(cfg, id, model, device)
 
+        self.bucket_size = int(self.defense_cfg.get("bucket_size_s")) # S
+
+        self.aggregator_func = self.__sequential_bucket_aggregate
+
+        print(" WITH SequentialBucketing ")
+
+    def _cosine_sorted_subsets(self, cosine_vals:torch.tensor, subset_size):
+        _, indices = torch.sort(cosine_vals)
+        indices = indices.tolist()
+
+        l = np.ceil(len(indices)/subset_size).astype(int) #num_bucket
+        # get S clusters
+        clusters = [ random.sample(indices[i*l: (i+1)*l], len(indices[i*l: (i+1)*l]))
+                                   for i in range(subset_size)]
+
+        out = []
+        for i in range(0, l):
+            buck_ = []
+            for j in range(subset_size):
+                buck_.extend(clusters[j][i:i+1])
+            out.append(buck_)
+        return out
+
+
+    def __sequential_bucket_aggregate(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs);    del wvecs
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
+
+        tau = self.get_tau()
+
+        ## Bucketing
+        cos_scores = torch_F.cosine_similarity( self.mom_deltawvec,
+                                    stacked_deltawvec, dim=1).flatten()
+        grps = self._cosine_sorted_subsets(cos_scores, self.bucket_size)
+        info_list = []
+        for gp in grps:
+            bucket_wvec = stacked_deltawvec[gp,:].view(len(gp), -1)
+            self.mom_deltawvec, rad_info = self.clipping_operation(bucket_wvec,
+                                                        self.mom_deltawvec,
+                                                        tau, self.clip_iters)
+            info_list.append(rad_info)
+
+        new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus1 = new_wvec.clone()
+
+        info_dict = {"client_clip_weightage":rad_info}
+
+        return agg_state, info_dict
 
 
 ##==============================================================================
