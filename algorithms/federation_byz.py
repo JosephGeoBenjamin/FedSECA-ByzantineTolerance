@@ -6,6 +6,7 @@ import h5py
 import torch
 import torch.nn.functional as torch_F
 import numpy as np
+import random
 import scipy
 import pyod
 import algorithms.federation_ops as fedops
@@ -717,6 +718,65 @@ class ClippingΞByzantine(NoGuardΞByzantine):
         info_dict = {"client_clip_weightage":rad_info}
 
         return agg_state, info_dict
+
+
+class RandomBucketingΞByzantine(ClippingΞByzantine):
+    """
+    reference: Karimireddy et al. "Byzantine-robust learning on heterogeneous datasets via bucketing." ICLR2022.
+    """
+    def __init__(self, cfg, id, model, device="cpu"):
+        super().__init__(cfg, id, model, device)
+
+        self.bucket_size = int(self.defense_cfg.get("bucket_size_s")) # S
+
+        self.aggregator_func = self.__random_bucket_aggregate
+
+
+    def _random_subsets(self, indices, subset_size):
+        indices = random.sample(indices, len(indices))
+        out = []
+        for i in range(0, len(indices), subset_size):
+            out.append( indices[i:i+subset_size] )
+        return out
+
+
+    def __random_bucket_aggregate(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs);    del wvecs
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
+
+        tau = self.get_tau()
+
+        ## Bucketing
+        grps = self._random_subsets(list(range(K)), self.bucket_size)
+        bucketed_list = []
+        for gp in grps:
+            bucket_mean = stacked_deltawvec[gp,:].mean(dim=0)
+            bucketed_list.append(bucket_mean)
+        bucketed_deltawvec = torch.vstack(bucketed_list);    del bucketed_list
+
+        ## Clipping
+        self.mom_deltawvec, rad_info = self.clipping_operation(bucketed_deltawvec,
+                                                     self.mom_deltawvec,
+                                                     tau, self.clip_iters)
+
+        new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus1 = new_wvec.clone()
+
+        info_dict = {"client_clip_weightage":rad_info}
+
+        return agg_state, info_dict
+
+
 
 
 ##==============================================================================

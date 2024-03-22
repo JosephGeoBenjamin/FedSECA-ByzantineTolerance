@@ -92,6 +92,13 @@
 
 
     {
+        "defense_method" : "SequentialBucketingΞByzantine",
+        "clip_radius"    : 100,
+        "clip_iters"     : 1,
+        "bucket_size_s"  : 2
+    },
+
+    {
     "defense_method"  : "NewTauLambdaΞByzantine",
     "feature_extractor_d": 512,
     "1_feature_extractor_d": 1280,
