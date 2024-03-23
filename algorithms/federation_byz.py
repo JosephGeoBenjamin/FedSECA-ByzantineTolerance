@@ -846,6 +846,99 @@ class SequentialBucketingΞByzantine(ClippingΞByzantine):
 
 ##==============================================================================
 
+class TiesMergeΞByzantine(NoGuardΞByzantine):
+    """
+    reference: Karimireddy et al. "Learning from history for byzantine robust optimization." ICML2021
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = K = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.tm_beta = self.defense_cfg.get("tm_beta")
+
+        self.aggregator_func = self.__ties_merging
+
+        ##
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+
+        print("Defense: Ties Merging")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+
+    def init_stacked_wvecs(self, model):
+        wvec = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore)
+        self.aggwvec_tminus1 = wvec
+
+
+    #-------- Server methods ----------
+    def safe_divide(self, nu, de, fill=1.0):
+        res = torch.full_like(nu, fill_value=fill)
+        mask = (de != 0.0)
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
+        return res
+
+
+    def __ties_merging(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
+
+        # for mag and sgn vectors
+        magn_dwvec = torch.abs(stacked_deltawvec).view(K,-1)
+
+        qs = magn_dwvec.quantile(self.tm_beta, dim=1).view(-1, 1)
+        stacked_deltawvec[magn_dwvec<qs] = 0.0
+
+        sign_dwvec = torch.sign(stacked_deltawvec.sum(dim=0)).view(1,-1)
+
+
+        disjoint_select = (0<(stacked_deltawvec * sign_dwvec)).bool() #select similar signed values
+
+        disjoint_dwvec = stacked_deltawvec * disjoint_select
+        disjoint_divisor = disjoint_select.sum(dim=0)
+
+        mean_dwvec = self.safe_divide(disjoint_dwvec.sum(dim=0), disjoint_divisor, fill=0.0)
+
+
+        new_wvec = self.aggwvec_tminus1 - mean_dwvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus1 = new_wvec.clone()
+
+        info_dict = {"client_clip_weightage": "Nope Can't do for coordwise operation"}
+
+        return agg_state, info_dict
+
+
+
 ##==============================================================================
 
 
