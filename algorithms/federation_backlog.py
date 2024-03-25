@@ -471,6 +471,12 @@ class NewTauLambdaΞByzantine(NoGuardΞByzantine): # Attempt 2
 
 
 class NewNewTauΞByzantine(NoGuardΞByzantine): # Attempt 2
+    # {
+    # "defense_method"  : "NewTauLambdaΞByzantine",
+    # "feature_extractor_d": 512,
+    # "1_feature_extractor_d": 1280,
+    # "datasummary" : "path/to/hdf5/with/dist_matrix/key.h5"
+    # }
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
