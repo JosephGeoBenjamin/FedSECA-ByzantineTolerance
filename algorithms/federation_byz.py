@@ -942,9 +942,8 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 ##==============================================================================
 
 
-class BillaΞByzantine(NoGuardΞByzantine):
+class SignVotedMergeΞByzantine(NoGuardΞByzantine):
     """
-    reference: Karimireddy et al. "Learning from history for byzantine robust optimization." ICML2021
     """
 
     def __init__(self, cfg, id, model, device="cpu"):
@@ -960,10 +959,6 @@ class BillaΞByzantine(NoGuardΞByzantine):
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
-        if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
-        self.radius_estimate = self.defense_cfg.get("clip_radius")
-
         self.tm_beta = self.defense_cfg.get("tm_beta")
 
         self.aggregator_func = self.__sign_voted_merging
@@ -973,7 +968,7 @@ class BillaΞByzantine(NoGuardΞByzantine):
         if self.id == "G": #large tensors, so why waste mem
             self.init_stacked_wvecs(model)
 
-        print("Defense: Ties Merging")
+        print("Defense: Sign Voted Merging")
 
         if len(self.byztn_cfg) != 0:
             self._init_byzantiness()
@@ -999,6 +994,51 @@ class BillaΞByzantine(NoGuardΞByzantine):
 
         res[mask] = torch.div(nu_, de[mask])
         return res
+
+
+    def __sign_voted_merging(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+        rad_info = None
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
+
+
+        ## mag and sgn vectors -> for ties
+        magn_dwvec = torch.abs(stacked_deltawvec).view(K,-1)
+
+        ## one ends
+        ql = magn_dwvec.quantile(self.tm_beta, dim=1)
+        ql = ql.view(-1, 1)
+        stacked_deltawvec[magn_dwvec<ql] = 0.0
+
+        sign_dwvec = torch.sign(stacked_deltawvec).sum(dim=0).view(1,-1) #this part is differnt from ties
+
+        disjoint_select = (0<(stacked_deltawvec * sign_dwvec)).bool() #select similar signed values
+
+        disjoint_dwvec = stacked_deltawvec * disjoint_select
+        disjoint_divisor = disjoint_select.sum(dim=0)
+
+        print("\n\nDisjointedness", disjoint_select.sum(dim=1).tolist())
+        ## mean
+        mean_dwvec = self.safe_divide(disjoint_dwvec.sum(dim=0), disjoint_divisor, fill=0.0)
+
+
+        new_wvec = self.aggwvec_tminus1 - mean_dwvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus1 = new_wvec.clone()
+
+        info_dict = {"client_clip_weightage": rad_info}
+
+        return agg_state, info_dict
+
 
     def get_tau(self):
         dtype_ = self.aggwvec_tminus1.dtype
