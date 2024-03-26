@@ -50,31 +50,31 @@
 
 
     {
-    "0_defense_method" : "NoGuardΞByzantine",
-    "1_defense_method" : "NoGuardΞByzantineDecopl"
+        "0_defense_method" : "NoGuardΞByzantine",
+        "1_defense_method" : "NoGuardΞByzantineDecopl"
     },
 
     {
-    "defense_method" : "KrumΞByzantine",
-    "multikrum_m"    : 1,
-    "num_assumed_byz": 2
+        "defense_method" : "KrumΞByzantine",
+        "multikrum_m"    : 1,
+        "num_assumed_byz": 2
     },
 
     {
-    "defense_method" : "CopodDosΞByzantine"
+        "defense_method" : "CopodDosΞByzantine"
     },
 
     {
-    "defense_method" : "CoordinateWiseCentralityΞByzantine",
-    "approach"        : "trimmedmean",
-    "cwtm_beta"      : 2,
-    "1_approch"      : "median"
+        "defense_method" : "CoordinateWiseCentralityΞByzantine",
+        "approach"        : "trimmedmean",
+        "cwtm_beta"      : 2,
+        "1_approch"      : "median"
     },
 
     {
-    "defense_method" : "GeoMedianRFAΞByzantine",
-    "stability_nu"   : 1e-6,
-    "budget_iter_r"  : 3
+        "defense_method" : "GeoMedianRFAΞByzantine",
+        "stability_nu"   : 1e-6,
+        "budget_iter_r"  : 3
     },
 
     {
@@ -99,11 +99,18 @@
     },
 
     {
-    "defense_method"  : "NewTauLambdaΞByzantine",
-    "feature_extractor_d": 512,
-    "1_feature_extractor_d": 1280,
-    "datasummary" : "path/to/hdf5/with/dist_matrix/key.h5"
+        "defense_method" : "TiesMergeΞByzantine",
+        "defense_method2" : "SignVotedMergeΞByzantine",
+        "tm_beta": 0.9
+    },
+
+    {
+        "defense_method" : "ClippedSignVotedMergeΞByzantine",
+        "tm_beta"      : 0.9,
+        "clip_radius"  : 100,
+        "clip_iters"   : 3
     }
+
 
 ]
 

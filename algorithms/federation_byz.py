@@ -1040,6 +1040,63 @@ class SignVotedMergeΞByzantine(NoGuardΞByzantine):
         return agg_state, info_dict
 
 
+
+class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
+    """    """
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = K = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
+        if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
+        self.radius_estimate = self.defense_cfg.get("clip_radius")
+
+        self.bucket_size = int(self.defense_cfg.get("bucket_size_s")) # S
+        self.tm_beta = self.defense_cfg.get("tm_beta")
+
+        self.aggregator_func = self.__seqential_sign_voted_merging
+
+        ##
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+
+        print("Defense: Clipping w Sign Voted Merging")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+    def init_stacked_wvecs(self, model):
+        wvec = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore)
+        self.aggwvec_tminus1 = wvec
+        self.mom_deltawvec = torch.zeros_like(wvec)
+
+
+    #-------- Server methods ----------
+    def safe_divide(self, nu, de, fill=1.0):
+        res_like = de if (sum(nu.shape) < sum(de.shape)) else nu
+        res = torch.full_like(res_like, fill_value=fill)
+        mask = (de != 0.0)
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
+        return res
+
+
     def get_tau(self):
         dtype_ = self.aggwvec_tminus1.dtype
 
@@ -1047,31 +1104,78 @@ class SignVotedMergeΞByzantine(NoGuardΞByzantine):
         return torch.tensor(tau, dtype=dtype_).view(1).to(self.device)
 
 
-    def clipper(self, x, v, tau, divisor, c_iter=1):
+    def clipper(self, xs, vs, tau, divisor=1, c_iter=1):
         """
         x : vectors   :shp:[K, len_parameters]
-        v : reference estimate vector   :shp:[1, len_parameters]
+        v : reference estimate vector   :shp:[K, len_parameters]
         tau: clipping radius
         divisor: for computing mean
         """
         rad_info = []
         for i in range(c_iter):
-            stacked_gdelta = torch.norm(x-v, dim=1).view(-1, 1) #
+            vs = vs.mean(dim=0)
 
-            tau_by_ccden = self.safe_divide(tau, stacked_gdelta, fill=0.0) ## just setting clipping radius for zero norm
+            stacked_delta = torch.norm(xs-vs, dim=1).view(-1, 1) #
+
+            tau_by_ccden = self.safe_divide(tau, stacked_delta, fill=0.0) ## just setting clipping radius for zero norm
             rad_comp = torch.minimum(torch.tensor(1), tau_by_ccden).view(-1,1)
 
-            clipped_delta = rad_comp * (x - v) # s1*[v1] \ s2*[v2] \ s3*v3 ...
-            clipped_aggdelta = self.safe_divide(clipped_delta.sum(dim=0) , divisor, fill=0.0)
+            clipped_delta = rad_comp * (xs - vs) # s1*[v1] \ s2*[v2] \ s3*v3 ...
 
-            v = v + clipped_aggdelta
+            vs = vs + clipped_delta
 
             rad_info.append(rad_comp.flatten().tolist())
 
-        return v, rad_info
+        return vs, rad_info
 
 
-    def __sign_voted_merging(self, lsets):
+    def _score_sorted_subsets(self, score_vals:torch.tensor, subset_size):
+        _, indices = torch.sort(score_vals)
+        indices = indices.tolist()
+
+        l = np.ceil(len(indices)/subset_size).astype(int) #num_bucket
+        # get S clusters
+        clusters = [ random.sample(indices[i*l: (i+1)*l], len(indices[i*l: (i+1)*l]))
+                                   for i in range(subset_size)]
+
+        out = []
+        for i in range(0, l):
+            buck_ = []
+            for j in range(subset_size):
+                buck_.extend(clusters[j][i:i+1])
+            out.append(buck_)
+        return out
+
+
+    def sign_voted_mean(self, dw, v=None):
+        if v is not None: x = torch.vstack([dw,v])
+        else: x = dw
+
+        ## mag and sgn vectors -> for ties
+        magn_x = torch.abs(x)
+
+        ## one ends
+        ql = magn_x.quantile(self.tm_beta, dim=1)
+        ql = ql.view(-1, 1)
+        x[magn_x<ql] = 0.0
+
+        sign_x = torch.sign(x).sum(dim=0).view(1,-1)
+
+        disjoint_select = (0<(x * sign_x)).int() #select similar signed values
+
+        disjoint_x = x * disjoint_select
+        disjoint_divisor = disjoint_select.sum(dim=0)
+
+        print("\n\n\n", disjoint_select.sum(dim=1).tolist())
+
+        ## mean
+        mean_dwvec = self.safe_divide(disjoint_x.sum(dim=0), disjoint_divisor, fill=0.0)
+
+        return mean_dwvec.view(1,-1)
+
+
+
+    def __seqential_sign_voted_merging(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         K = len(lsets)
         rad_info = None
@@ -1083,35 +1187,29 @@ class SignVotedMergeΞByzantine(NoGuardΞByzantine):
         stacked_wvec = torch.vstack(wvecs)
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
 
+        tau = self.get_tau()
+        momcliped_stacked_dwvec, rad_info = self.clipper(stacked_deltawvec,
+                                        self.mom_deltawvec, tau,
+                                        c_iter=self.clip_iters)
 
-        ## mag and sgn vectors -> for ties
-        magn_dwvec = torch.abs(stacked_deltawvec).view(K,-1)
+        # sim_scores = torch.norm( self.mom_deltawvec - stacked_deltawvec, dim=1).flatten()
+        # grps = self._score_sorted_subsets(sim_scores, self.bucket_size)
 
-        ## one ends
-        ql = magn_dwvec.quantile(self.tm_beta, dim=1)
-        ql = ql.view(-1, 1)
-        stacked_deltawvec[magn_dwvec<ql] = 0.0
+        # bucketed_list = []
+        # for gp in grps:
+        #     bucket_mean = self.sign_voted_mean(self.mom_deltawvec, stacked_deltawvec[gp,:])
+        #     bucketed_list.append(bucket_mean)
+        # bucketed_deltawvec = torch.vstack(bucketed_list);    del bucketed_list
 
-        sign_dwvec = torch.sign(stacked_deltawvec).sum(dim=0).view(1,-1) #this part is differnt from ties
+        votedmean_dwvec = self.sign_voted_mean(momcliped_stacked_dwvec)
 
-        disjoint_select = (0<(stacked_deltawvec * sign_dwvec)).bool() #select similar signed values
-
-        disjoint_dwvec = stacked_deltawvec * disjoint_select
-        disjoint_divisor = disjoint_select.sum(dim=0)
-
-        print("\n\nDisjointedness", disjoint_select.sum(dim=1).tolist())
-        ## mean
-        mean_dwvec = self.safe_divide(disjoint_dwvec.sum(dim=0), disjoint_divisor, fill=0.0)
-
-
-        new_wvec = self.aggwvec_tminus1 - mean_dwvec
+        new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
         agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
         self.aggwvec_tminus1 = new_wvec.clone()
+        self.mom_deltawvec = momcliped_stacked_dwvec #original not sign voted
 
         info_dict = {"client_clip_weightage": rad_info}
-
-        return agg_state, info_dict
 
         return agg_state, info_dict
