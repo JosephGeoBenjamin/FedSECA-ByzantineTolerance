@@ -1084,16 +1084,17 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
 
 
     #-------- Server methods ----------
-    def safe_divide(self, nu, de, fill=1.0):
+    def safe_divide(self, nu, de, fill=1.0): ## shape Fixed version
         res_like = de if (sum(nu.shape) < sum(de.shape)) else nu
         res = torch.full_like(res_like, fill_value=fill)
+
+        try:
+            nu, de = torch.broadcast_tensors(nu, de)
+        except Exception as err: 
+            raise Exception(f"Incompatible shapes {de.shape}, {nu.shape} -- \n{err}")
+
         mask = (de != 0.0)
-
-        if (nu.shape == mask.shape): nu_ = nu[mask]
-        elif (sum(nu.shape) == 1):   nu_ = nu
-        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
-
-        res[mask] = torch.div(nu_, de[mask])
+        res[mask] = torch.div(nu[mask], de[mask])
         return res
 
 
