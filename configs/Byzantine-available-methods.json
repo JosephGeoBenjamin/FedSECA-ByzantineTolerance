@@ -105,8 +105,8 @@
     },
 
     {
-        "defense_method" : "ClippedSignVotedMergeΞByzantine",
-        "tm_beta"      : 0.9,
+        "defense_method" : "ReputationVotedMergeΞByzantine",
+        "tm_gamma"      : 0.9,
         "clip_radius"  : 100,
         "clip_iters"   : 3
     }

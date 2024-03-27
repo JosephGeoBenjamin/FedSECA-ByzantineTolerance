@@ -938,9 +938,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
         return agg_state, info_dict
 
 
-
-##==============================================================================
-
+##---------------------------------------------------------------------------------------
 
 class SignVotedMergeΞByzantine(NoGuardΞByzantine):
     """
@@ -1041,8 +1039,11 @@ class SignVotedMergeΞByzantine(NoGuardΞByzantine):
 
 
 
-class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
-    """    """
+##======================================================================================
+
+
+class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
+
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
         self.device = device
@@ -1060,8 +1061,7 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
         if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
         self.radius_estimate = self.defense_cfg.get("clip_radius")
 
-        self.bucket_size = int(self.defense_cfg.get("bucket_size_s")) # S
-        self.tm_beta = self.defense_cfg.get("tm_beta")
+        self.tm_gamma = self.defense_cfg.get("tm_gamma")
 
         self.aggregator_func = self.__seqential_sign_voted_merging
 
@@ -1099,13 +1099,15 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
 
 
     def get_tau(self):
+        """ should be computed as 10 / (1-momentum_beta) as indicated in clipping paper
+        so for local momentum of 0.9 will be 100
+        """
         dtype_ = self.aggwvec_tminus1.dtype
-
         tau = self.radius_estimate
         return torch.tensor(tau, dtype=dtype_).view(1).to(self.device)
 
 
-    def clipper(self, xs, vs, tau, divisor=1, c_iter=1):
+    def clipper(self, xs, v, tau, divisor=1, c_iter=1):
         """
         x : vectors   :shp:[K, len_parameters]
         v : reference estimate vector   :shp:[K, len_parameters]
@@ -1113,10 +1115,9 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
         divisor: for computing mean
         """
         rad_info = []
+        vs = v.clone()
         for i in range(c_iter):
-            vs = vs.mean(dim=0)
-
-            stacked_delta = torch.norm(xs-vs, dim=1).view(-1, 1) #
+            stacked_delta = torch.norm(xs-vs.mean(dim=0), dim=1).view(-1, 1) #
 
             tau_by_ccden = self.safe_divide(tau, stacked_delta, fill=0.0) ## just setting clipping radius for zero norm
             rad_comp = torch.minimum(torch.tensor(1), tau_by_ccden).view(-1,1)
@@ -1127,6 +1128,7 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
 
             rad_info.append(rad_comp.flatten().tolist())
 
+        vs = vs / c_iter
         return vs, rad_info
 
 
@@ -1145,7 +1147,7 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
         ## mag and sgn vectors -> for ties
         magn_x = torch.abs(x)
 
-        ql = magn_x.quantile(self.tm_beta, dim=1)
+        ql = magn_x.quantile(self.tm_gamma, dim=1)
         ql = ql.view(-1, 1)
         x[magn_x<ql] = 0.0
 
@@ -1157,16 +1159,15 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
         voted_sign = (sign_x*repute.view(-1,1)).sum(dim=0).view(1,-1)
 
         disjoint_select = (0<(x * voted_sign)).int() #select similar signed values
-
         disjoint_x = x * disjoint_select
         disjoint_divisor = disjoint_select.sum(dim=0)
-
-        print("\n\n\n", repute,"\n", disjoint_select.sum(dim=1).tolist())
 
         ## mean
         mean_dwvec = self.safe_divide(disjoint_x.sum(dim=0), disjoint_divisor, fill=0.0)
 
-        return mean_dwvec.view(1,-1)
+        print("\n\n\n", repute,"\n", disjoint_select.sum(dim=1).tolist())
+
+        return mean_dwvec.view(1,-1), repute.flatten().tolist()
 
 
 
@@ -1187,24 +1188,15 @@ class ClippedSignVotedMergeΞByzantine(NoGuardΞByzantine):
         #                                 self.mom_deltawvec, tau,
         #                                 c_iter=self.clip_iters)
 
-        # sim_scores = torch.norm( self.mom_deltawvec - stacked_deltawvec, dim=1).flatten()
-        # grps = self._score_sorted_subsets(sim_scores, self.bucket_size)
-
-        # bucketed_list = []
-        # for gp in grps:
-        #     bucket_mean = self.sign_voted_mean(self.mom_deltawvec, stacked_deltawvec[gp,:])
-        #     bucketed_list.append(bucket_mean)
-        # bucketed_deltawvec = torch.vstack(bucketed_list);    del bucketed_list
-
-        votedmean_dwvec = self.sign_voted_mean(stacked_deltawvec)
+        votedmean_dwvec, repute_info = self.sign_voted_mean(stacked_deltawvec)
 
         new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
         agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
         self.aggwvec_tminus1 = new_wvec.clone()
-        # self.mom_deltawvec = momcliped_stacked_dwvec #original not sign voted
+        self.mom_deltawvec = votedmean_dwvec #sign voted
 
-        info_dict = {"client_clip_weightage": rad_info}
+        info_dict = {"client_clip_weightage": rad_info, "repute_score": repute_info}
 
         return agg_state, info_dict
