@@ -288,6 +288,8 @@ class MimicζAttack():
         return out_state
 
 
+
+## TODO: Fix the byzantine tolerance
 class OzfaturaROPζAttack():
     """
     Reference: Byzantines can also Learn from History: Fall of Centered Clipping in Federated Learning
