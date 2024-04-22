@@ -309,7 +309,7 @@ class OzfaturaROPζAttack():
         self.first_step_ignore = True
 
         ## this is global common start point
-        self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
+        self.gwvec_tminus2:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
                                     keys_to_ignore=self.vec_state_ignore)
 
         if not self.z_max:
@@ -322,33 +322,38 @@ class OzfaturaROPζAttack():
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
-        ## Benign Gradients m_t:
         local_states = []
         for kid in omniscience.keys(): # clientwise train info
             local_states.append(omniscience[kid]["model"].state_dict())
         benign_state = fedops.global_average_statedict(local_states)
-
-        m_t = fedops.get_param_from_state(copy.deepcopy(benign_state),
+        benign_wvec = fedops.get_param_from_state(copy.deepcopy(benign_state),
                                     keys_to_ignore=self.vec_state_ignore).to(self.device)
 
-        ## Global reference m~(t-1) :-> ud = self.global_momentum.clone()
-        m_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
-                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+        gwvec_tminus1 = fedops.get_param_from_state(
+                    gmodel_state_tminus1,
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
+        benign_grads = gwvec_tminus1 - benign_wvec
 
-        ## reference point, global momentum
+        ## m_bar_t :-> aggregate of Benign Gradients
+        m_bar_t = benign_grads
+
+        ## Global aggregate of all m~(t-1) :-> ud = self.global_momentum.clone()
+        m_tilde_tminus1 =  self.gwvec_tminus2 - gwvec_tminus1
+
+        ### reference point, global momentum
         # here we can take 0th or (t-1)th based on clipping defense used
-        ud = m_tminus1.clone()
         # if first iteration, set the reference point to the mean of the benign momentums
         if self.first_step_ignore:
-            ud = m_t.clone()
+            m_tilde_tminus1 = m_bar_t.clone()
             self.first_step_ignore = False
 
         ## Target point of attack ; between previous and current
-        ud = (ud * self.lmbd) + (m_t * (1-self.lmbd))
+        # m_hat_t :-> ud
+        ud = (m_tilde_tminus1 * self.lmbd) + (m_bar_t * (1-self.lmbd))
 
         ## Orthogonal vector
-        pert = torch.ones_like(m_t)  # inital perturbation
+        pert = torch.ones_like(m_bar_t)  # inital perturbation
         proj_pert = ud * ((pert @ ud) / (ud @ ud)) # vector projection
         pert = pert - proj_pert # vector orthogonal to ud (rejecting the projection)
 
@@ -363,11 +368,14 @@ class OzfaturaROPζAttack():
         pert = pert * (self.z_max / pert.norm()) # scale the perturbation
 
         ## The Attack
-        attack_location = (m_tminus1 * self.rho) + (m_t * (1-self.rho)) #relocate reference
-        attack_wvec = attack_location + pert # final attack added to desired location
+        attack_location = (m_tilde_tminus1 * self.rho) + (m_bar_t * (1-self.rho)) #relocate reference
+        attack_grad = attack_location + pert # final attack added to desired location
 
+        attack_wvec = gwvec_tminus1 - attack_grad
         out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth), attack_wvec,
                                     keys_to_ignore=self.vec_state_ignore)
 
-        self.gwvec_tminus1 = m_tminus1.clone()
+        del self.gwvec_tminus2
+        self.gwvec_tminus2 = gwvec_tminus1.clone()
+
         return out_state
