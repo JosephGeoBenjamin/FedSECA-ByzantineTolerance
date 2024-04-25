@@ -129,12 +129,45 @@ def load_EfficientnetBackbone(arch, torch_pretrain= None, freeze= False):
     return backbone, outfeat_size
 
 
+def load_ConvNextBackbone(arch, torch_pretrain= None, freeze= False):
+
+    ## pretrain setting
+    if torch_pretrain in ["DEFAULT", "IMAGENET-1K"]:
+        torch_pretrain = "DEFAULT"
+    elif torch_pretrain in [None, "NONE", "none", "None"]:
+        torch_pretrain = None
+    else:
+        raise ValueError("Unknown pretrain weight type requested ", torch_pretrain )
+    print("Torch Pretrain Set to ...", torch_pretrain)
+
+    ## Model loading
+    if arch == 'convnext_tiny':
+        backbone = torchvision.models.convnext_tiny(
+                                weights=torch_pretrain)
+        outfeat_size = 768
+    elif arch == 'convnext_small':
+        backbone = torchvision.models.convnext_small(
+                                weights=torch_pretrain)
+        outfeat_size = 768
+    else:
+        raise ValueError(f"Unsupported Model Implementation {arch} called in {os.path.basename(__file__)}")
+    backbone.classifier = nn.Flatten(start_dim=1)  #remove fc of default arch
+
+    # freeze model
+    if freeze: backbone = freeze_weights(backbone)
+
+    return backbone, outfeat_size
+
+
+
 def getBackboneNetwork(arch, torch_pretrain= None, freeze= False):
 
     if "resnet" in arch:
         network = load_ResnetBackbone(arch, torch_pretrain, freeze)
     elif "efficientnet" in arch:
         network = load_EfficientnetBackbone(arch, torch_pretrain, freeze)
+    elif "convnext" in arch:
+        network = load_ConvNextBackbone(arch, torch_pretrain, freeze)
     elif "basic" in arch:
         network = load_BasicBackbone(arch, torch_pretrain, freeze)
     else:
