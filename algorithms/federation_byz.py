@@ -966,7 +966,7 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
 
         self.tm_gamma = self.defense_cfg.get("tm_gamma")
 
-        self.aggregator_func = self.__seqential_sign_voted_merging
+        self.aggregator_func = self.__fedrise_merging
 
         ##
         self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
@@ -1074,7 +1074,7 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
 
 
 
-    def __seqential_sign_voted_merging(self, lsets):
+    def __fedrise_merging(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         K = len(lsets)
         rad_info = None
@@ -1085,11 +1085,6 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
-
-        # tau = self.get_tau()
-        # momcliped_stacked_dwvec, rad_info = self.clipper(stacked_deltawvec,
-        #                                 self.mom_deltawvec, tau,
-        #                                 c_iter=self.clip_iters)
 
         votedmean_dwvec, repute_info = self.sign_voted_mean(stacked_deltawvec)
 
