@@ -984,9 +984,12 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
                         keys_to_ignore=self.vec_state_ignore)
         self.aggwvec_tminus1 = wvec
         self.mom_deltawvec = torch.zeros_like(wvec)
+        self.prev_sign_x  = torch.zeros_like(wvec)
+        self.prior_repute = 0
 
 
-    #-------- Server methods ----------
+    #----------------- Server methods ------------------------------------------------
+
     def safe_divide(self, nu, de, fill=1.0): ## shape Fixed version
         res_like = de if (sum(nu.shape) < sum(de.shape)) else nu
         res = torch.full_like(res_like, fill_value=fill)
@@ -1000,6 +1003,8 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         res[mask] = torch.div(nu[mask], de[mask])
         return res
 
+
+    # -------- Clipping --------
 
     def get_tau(self):
         """ should be computed as 10 / (1-momentum_beta) as indicated in clipping paper
@@ -1035,13 +1040,40 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         return vs, rad_info
 
 
+    # -------- reputation --------
+    def _torch_kendallTauA(self, a, b):
+        ## tau_a = (P - Q) / (N(N-1)/2)
+        ## tau_b = (P - Q) / sqrt((P + Q + T) * (P + Q + U))
+
+        a_sgn = torch.sign(a)
+        b_sgn = torch.sign(b)
+
+        sgn_pair = a_sgn * b_sgn
+
+        n_conc = (sgn_pair>0).sum(dim=1)
+        n_disc = (sgn_pair<0).sum(dim=1)
+        n = torch.prod(torch.tensor(b_sgn[0].shape)) #number of params
+
+        # taua = (n_conc - n_disc) / torch.prod(torch.tensor(a_sgn.shape))
+        taua = (n_conc - n_disc) / (n_conc+n_disc)
+        # taua = (n_conc - n_disc) / (n*(n-1)/2)
+
+        return taua
+
+
     def _reputation_score(self, sign_x):
+        mom_rep = 0.9
         score_list = []
         for i in range(sign_x.shape[0]):
-            score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
-            s = torch.clamp(torch.sign(score).mean(), min=0)
+            # score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
+            score = self._torch_kendallTauA(sign_x , sign_x[i].view(1,-1))
+            s = torch.sign(score).mean()
             score_list.append(s)
-        return torch.vstack(score_list)
+        current_repute = torch.vstack(score_list)
+
+        self.prior_repute  = mom_rep*self.prior_repute + (1-mom_rep)*current_repute
+        repute = torch.clamp(self.prior_repute, min=0)
+        return repute
 
 
     def sign_voted_mean(self, dw):
@@ -1055,6 +1087,7 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         x[magn_x<ql] = 0.0
 
         sign_x = torch.sign(x)
+        # sign_x = torch.sign(self.prev_sign_x + sign_x)
 
         ## vote with repute
         repute = self._reputation_score(sign_x)
@@ -1068,8 +1101,9 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         ## mean
         mean_dwvec = self.safe_divide(disjoint_x.sum(dim=0), disjoint_divisor, fill=0.0)
 
-        print("\n\n\n", repute,"\n", disjoint_select.sum(dim=1).tolist())
+        self.prev_sign_x = voted_sign
 
+        print("\n\n\n", repute,"\n", disjoint_select.sum(dim=1).tolist())
         return mean_dwvec.view(1,-1), repute.flatten().tolist()
 
 
@@ -1077,9 +1111,9 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
     def __fedrise_merging(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         K = len(lsets)
+        mom_beta = 0.5
         rad_info = None
 
-        #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
                     keys_to_ignore=self.vec_state_ignore)
                     for l in lsets]
@@ -1088,12 +1122,14 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
 
         votedmean_dwvec, repute_info = self.sign_voted_mean(stacked_deltawvec)
 
-        new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
+        self.mom_deltawvec = (1-mom_beta)*votedmean_dwvec + mom_beta*self.mom_deltawvec
+        new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec.view(-1)
+
+        # new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
         agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
         self.aggwvec_tminus1 = new_wvec.clone()
-        self.mom_deltawvec = votedmean_dwvec #sign voted
 
         info_dict = {"client_clip_weightage": rad_info, "repute_score": repute_info}
 
