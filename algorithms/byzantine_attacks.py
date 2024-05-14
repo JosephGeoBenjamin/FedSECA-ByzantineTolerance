@@ -51,7 +51,7 @@ class AffineζAttack():
         self.byz_cfg = cfg.byztn_cfg
         self.scaler = cfg.byztn_cfg["scale"]
 
-        print("ATTACK: AffineζAttack")
+        print("ATTACK: AffineζAttack", self.scaler)
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)

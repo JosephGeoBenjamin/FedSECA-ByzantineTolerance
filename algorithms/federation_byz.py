@@ -945,7 +945,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 ##======================================================================================
 
 
-class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
+class FedRiseΞByzantine(NoGuardΞByzantine):
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -960,10 +960,7 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        self.clip_iters = int(self.defense_cfg.get("clip_iters")) # if zero no clipping will happen
-        if self.clip_iters==0: print("Clipping disabled since clip iters is 0")
-        self.radius_estimate = self.defense_cfg.get("clip_radius")
-
+        self.mom_beta = self.defense_cfg.get("moment_beta")
         self.tm_gamma = self.defense_cfg.get("tm_gamma")
 
         self.aggregator_func = self.__fedrise_merging
@@ -984,11 +981,12 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
                         keys_to_ignore=self.vec_state_ignore)
         self.aggwvec_tminus1 = wvec
         self.mom_deltawvec = torch.zeros_like(wvec)
-        self.prev_sign_x  = torch.zeros_like(wvec)
-        self.prior_repute = 0
+        # self.error_deltawvec = torch.zeros_like(wvec)
+        # self.prior_repute = 0
 
-
-    #----------------- Server methods ------------------------------------------------
+    # ---------------
+    # Server methods -----------------------------------------------------------
+    # ---------------
 
     def safe_divide(self, nu, de, fill=1.0): ## shape Fixed version
         res_like = de if (sum(nu.shape) < sum(de.shape)) else nu
@@ -1004,43 +1002,23 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         return res
 
 
-    # -------- Clipping --------
+    # ------------ Gradient Clipping -------------------------------------------
 
-    def get_tau(self):
-        """ should be computed as 10 / (1-momentum_beta) as indicated in clipping paper
-        so for local momentum of 0.9 will be 100
+    def _locwise_grad_clamper(self, xs):
         """
-        dtype_ = self.aggwvec_tminus1.dtype
-        tau = self.radius_estimate
-        return torch.tensor(tau, dtype=dtype_).view(1).to(self.device)
-
-
-    def clipper(self, xs, v, tau, divisor=1, c_iter=1):
-        """
+        Median Clamping
         x : vectors   :shp:[K, len_parameters]
-        v : reference estimate vector   :shp:[K, len_parameters]
-        tau: clipping radius
-        divisor: for computing mean
         """
-        rad_info = []
-        vs = v.clone()
-        for i in range(c_iter):
-            stacked_delta = torch.norm(xs-vs.mean(dim=0), dim=1).view(-1, 1) #
 
-            tau_by_ccden = self.safe_divide(tau, stacked_delta, fill=0.0) ## just setting clipping radius for zero norm
-            rad_comp = torch.minimum(torch.tensor(1), tau_by_ccden).view(-1,1)
+        med_mag,_ = torch.median(torch.abs(xs), dim=0)
 
-            clipped_delta = rad_comp * (xs - vs) # s1*[v1] \ s2*[v2] \ s3*v3 ...
+        vs = torch.clamp(xs, max=med_mag, min=-med_mag)
 
-            vs = vs + clipped_delta
-
-            rad_info.append(rad_comp.flatten().tolist())
-
-        vs = vs / c_iter
-        return vs, rad_info
+        return vs
 
 
-    # -------- reputation --------
+    ## ----------------------- Reputation --------------------------------------
+
     def _torch_kendallTauA(self, a, b):
         ## tau_a = (P - Q) / (N(N-1)/2)
         ## tau_b = (P - Q) / sqrt((P + Q + T) * (P + Q + U))
@@ -1062,7 +1040,8 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
 
 
     def _reputation_score(self, sign_x):
-        mom_rep = 0.9
+        # mom_rep = 0.0 #fixed
+
         score_list = []
         for i in range(sign_x.shape[0]):
             # score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
@@ -1071,13 +1050,20 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
             score_list.append(s)
         current_repute = torch.vstack(score_list)
 
-        self.prior_repute  = mom_rep*self.prior_repute + (1-mom_rep)*current_repute
-        repute = torch.clamp(self.prior_repute, min=0)
+        # self.prior_repute  = mom_rep*self.prior_repute + (1-mom_rep)*current_repute
+        # repute = torch.clamp(self.prior_repute, min=0)
+
+        repute = torch.clamp(current_repute, min=0)
         return repute
 
 
+    ## ----------------------- Merging --------------------------------------
+
     def sign_voted_mean(self, dw):
         x = dw
+
+        ## clamp the max grads
+        x = self._locwise_grad_clamper(x)
 
         ## mag and sgn vectors -> for ties
         magn_x = torch.abs(x)
@@ -1087,7 +1073,6 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         x[magn_x<ql] = 0.0
 
         sign_x = torch.sign(x)
-        # sign_x = torch.sign(self.prev_sign_x + sign_x)
 
         ## vote with repute
         repute = self._reputation_score(sign_x)
@@ -1098,10 +1083,8 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
         disjoint_x = x * disjoint_select
         disjoint_divisor = disjoint_select.sum(dim=0)
 
-        ## mean
+        ## mean final output
         mean_dwvec = self.safe_divide(disjoint_x.sum(dim=0), disjoint_divisor, fill=0.0)
-
-        self.prev_sign_x = voted_sign
 
         print("\n\n\n", repute,"\n", disjoint_select.sum(dim=1).tolist())
         return mean_dwvec.view(1,-1), repute.flatten().tolist()
@@ -1111,7 +1094,6 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
     def __fedrise_merging(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         K = len(lsets)
-        mom_beta = 0.5
         rad_info = None
 
         wvecs =[fedops.get_param_from_state(l["model_state"],
@@ -1122,7 +1104,8 @@ class ReputationVotedMergeΞByzantine(NoGuardΞByzantine):
 
         votedmean_dwvec, repute_info = self.sign_voted_mean(stacked_deltawvec)
 
-        self.mom_deltawvec = (1-mom_beta)*votedmean_dwvec + mom_beta*self.mom_deltawvec
+        self.mom_deltawvec = (1-self.mom_beta)*votedmean_dwvec + \
+                                self.mom_beta*self.mom_deltawvec
         new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec.view(-1)
 
         # new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
