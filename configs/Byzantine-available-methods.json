@@ -100,12 +100,11 @@
 
     {
         "defense_method" : "TiesMergeΞByzantine",
-        "defense_method2" : "SignVotedMergeΞByzantine",
         "tm_beta": 0.9
     },
 
     {
-        "defense_method" : "FedRiseΞByzantine",
+        "defense_method" : "FedRiseV2ΞByzantine",
         "tm_gamma"       : 0.9,
         "moment_beta"    : 0.5
     }

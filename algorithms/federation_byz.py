@@ -514,8 +514,9 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
             l2_dists.append(torch.norm(stacked_wvec-v, dim=1))
             cs_dists.append(1-torch_F.cosine_similarity(stacked_wvec,
                                                       v.view(1, -1), dim=1))
-        l2_dists = torch.vstack(l2_dists).cpu()
-        cs_dists = torch.vstack(cs_dists).cpu()
+
+        l2_dists = torch.nan_to_num(torch.vstack(l2_dists).cpu())
+        cs_dists = torch.nan_to_num(torch.vstack(cs_dists).cpu())
 
         self.cpd_l2.fit(l2_dists)
         self.cpd_cs.fit(cs_dists)
@@ -945,7 +946,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 ##======================================================================================
 
 
-class FedRiseΞByzantine(NoGuardΞByzantine):
+class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -970,7 +971,7 @@ class FedRiseΞByzantine(NoGuardΞByzantine):
         if self.id == "G": #large tensors, so why waste mem
             self.init_stacked_wvecs(model)
 
-        print("Defense: Clipping w Sign Voted Merging")
+        print(f"Defense: FedRISE beta-{self.mom_beta} gamma-{self.tm_gamma}")
 
         if len(self.byztn_cfg) != 0:
             self._init_byzantiness()
