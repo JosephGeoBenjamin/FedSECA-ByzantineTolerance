@@ -899,6 +899,14 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
         res[mask] = torch.div(nu_, de[mask])
         return res
 
+    def tensor_quantile(tnsr, q, dim=1):
+        # torch quantile only works for 16M<elements
+        numpy_tensor = tnsr.cpu().numpy()
+        result = np.quantile(numpy_tensor, q, axis=dim)
+        tnsr_result = torch.tensor(result)
+        return tnsr_result
+
+
 
     def __ties_merging(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
@@ -914,7 +922,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
         # for mag and sgn vectors
         magn_dwvec = torch.abs(stacked_deltawvec).view(K,-1)
 
-        qs = magn_dwvec.quantile(self.tm_beta, dim=1).view(-1, 1)
+        qs = self.tensor_quantile(magn_dwvec, self.tm_beta, dim=1).view(-1, 1)
         stacked_deltawvec[magn_dwvec<qs] = 0.0
 
         sign_dwvec = torch.sign(stacked_deltawvec.sum(dim=0)).view(1,-1)
@@ -1002,6 +1010,12 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         res[mask] = torch.div(nu[mask], de[mask])
         return res
 
+    def tensor_quantile(tnsr, q, dim=1):
+        # torch quantile only works for 16M<elements
+        numpy_tensor = tnsr.cpu().numpy()
+        result = np.quantile(numpy_tensor, q, axis=dim)
+        tnsr_result = torch.tensor(result)
+        return tnsr_result
 
     # ------------ Gradient Clipping -------------------------------------------
 
@@ -1069,7 +1083,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         ## mag and sgn vectors -> for ties
         magn_x = torch.abs(x)
 
-        ql = magn_x.quantile(self.tm_gamma, dim=1)
+        ql = self.tensor_quantile(magn_x, self.tm_gamma, dim=1)
         ql = ql.view(-1, 1)
         x[magn_x<ql] = 0.0
 
