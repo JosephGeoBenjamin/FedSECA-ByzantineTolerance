@@ -899,11 +899,11 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
         res[mask] = torch.div(nu_, de[mask])
         return res
 
-    def tensor_quantile(tnsr, q, dim=1):
+    def tensor_quantile(self, tnsr, q, dim=1):
         # torch quantile only works for 16M<elements
         numpy_tensor = tnsr.cpu().numpy()
         result = np.quantile(numpy_tensor, q, axis=dim)
-        tnsr_result = torch.tensor(result)
+        tnsr_result = torch.tensor(result).to(tnsr.device)
         return tnsr_result
 
 
@@ -922,7 +922,8 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
         # for mag and sgn vectors
         magn_dwvec = torch.abs(stacked_deltawvec).view(K,-1)
 
-        qs = self.tensor_quantile(magn_dwvec, self.tm_beta, dim=1).view(-1, 1)
+        qs = self.tensor_quantile(magn_dwvec, self.tm_beta, dim=1)
+        qs = qs.view(-1, 1)
         stacked_deltawvec[magn_dwvec<qs] = 0.0
 
         sign_dwvec = torch.sign(stacked_deltawvec.sum(dim=0)).view(1,-1)
@@ -1010,7 +1011,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         res[mask] = torch.div(nu[mask], de[mask])
         return res
 
-    def tensor_quantile(tnsr, q, dim=1):
+    def tensor_quantile(self, tnsr, q, dim=1):
         # torch quantile only works for 16M<elements
         numpy_tensor = tnsr.cpu().numpy()
         result = np.quantile(numpy_tensor, q, axis=dim)
