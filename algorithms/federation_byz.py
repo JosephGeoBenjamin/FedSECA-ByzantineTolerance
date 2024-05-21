@@ -885,7 +885,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         # torch quantile only works for 16M<elements
         numpy_tensor = tnsr.cpu().numpy()
         result = np.quantile(numpy_tensor, q, axis=dim)
-        tnsr_result = torch.tensor(result)
+        tnsr_result = torch.tensor(result).to(tnsr.device)
         return tnsr_result
 
     # ------------ Gradient Clipping -------------------------------------------
