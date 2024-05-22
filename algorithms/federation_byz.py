@@ -11,7 +11,7 @@ import scipy
 import pyod
 import algorithms.federation_ops as fedops
 import algorithms.byzantine_attacks as byz_attacks
-
+import utilities.runUtils as rutl
 from utilities.logUtils import LOG2CSV
 
 """
@@ -26,9 +26,9 @@ Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
 ##==============================================================================
 ## COMMONS
 
-def get_attack_func(method_string):
-    attack_func = getattr(byz_attacks, method_string)
-    return attack_func
+def get_attack_clsobj(method_string):
+    attack_clsobj = getattr(byz_attacks, method_string)
+    return attack_clsobj
 
 def remove_diagonal(x): #contract along dim=1
     n, m = x.shape
@@ -91,7 +91,7 @@ class NoGuardΞByzantine():
     def _init_byzantiness(self):
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
         if self.id in byz_clients:
-            self.byz_way = get_attack_func(self.byztn_cfg["byztn_method"])(
+            self.byz_way = get_attack_clsobj(self.byztn_cfg["byztn_method"])(
                 self.cfg, self.gmodel_init, self.device)
 
 
@@ -106,7 +106,8 @@ class NoGuardΞByzantine():
         model = fedops.model_copier(zxs["model"])
 
         if self.byz_way:
-            out_state = self.byz_way.modify(model.state_dict(),
+            with torch.no_grad():
+                out_state = self.byz_way.modify(model.state_dict(),
                                             self.gmodel_tminus1.state_dict(),
                                             omniscience=zxs["omniscience"])
         else:
@@ -990,16 +991,23 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
         votedmean_dwvec, repute_info = self.sign_voted_mean(stacked_deltawvec)
 
-        self.mom_deltawvec = (1-self.mom_beta)*votedmean_dwvec + \
+        moment_deltawvec = (1-self.mom_beta)*votedmean_dwvec + \
                                 self.mom_beta*self.mom_deltawvec
-        new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec.view(-1)
+        new_wvec = self.aggwvec_tminus1 - moment_deltawvec.view(-1)
 
         # new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
         agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
-        self.aggwvec_tminus1 = new_wvec.clone()
+        ## free mem & reassign
+        del self.aggwvec_tminus1
+        self.aggwvec_tminus1 = new_wvec.detach()
+        del self.mom_deltawvec
+        self.mom_deltawvec = moment_deltawvec.detach()
+        del wvecs
+        ## ^^^^^^^^^^^
 
         info_dict = {"client_clip_weightage": rad_info, "repute_score": repute_info}
+
 
         return agg_state, info_dict
