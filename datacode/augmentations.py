@@ -206,3 +206,60 @@ class HumbleAuguments:
 
     def get_composition(self):
         return str(self.transform_main)
+
+
+##====================== iNaturalist Transforms =============================
+
+class DeiTAuguments:
+    ## Note: Adapted from DeiT https://github.com/facebookresearch/deit/blob/main/augment.py
+    ## Data-augmentation (DA) based on dino DA (https://github.com/facebookresearch/dino
+    ##    and timm DA(https://github.com/rwightman/pytorch-image-models)
+    ## Used for iNaturalist in my repo
+
+    def __init__(self, method = "train", image_size = 224):
+        self.image_size =  image_size
+        print("IMAGESIZE SET::", self.image_size)
+
+        data_mean = IMAGENET_MEAN_STD[0]
+        data_std  = IMAGENET_MEAN_STD[1]
+
+        ##--------
+        primary_tfl = [
+            torch_transforms.Resize(image_size, interpolation=3),
+            torch_transforms.RandomCrop(image_size, padding=4,padding_mode='reflect'),
+            torch_transforms.RandomHorizontalFlip()
+        ]
+        secondary_tfl = [torch_transforms.RandomChoice([
+            torch_transforms.Grayscale(num_output_channels=3),
+            torch_transforms.RandomSolarize(threshold=128, p=1.0),
+            torch_transforms.GaussianBlur(kernel_size=(9), sigma=(0.1, 2.0)),
+            torch_transforms.ColorJitter(0.3)
+            ])]
+        ##--------
+
+        train_transform = torch_transforms.Compose(
+            primary_tfl+secondary_tfl+[
+            torch_transforms.ToTensor(),
+            torch_transforms.Normalize(mean=data_mean, std=data_std),
+            # torch_transforms.RandomErasing(p=0.5, value=0),
+        ])
+
+        infer_transform = torch_transforms.Compose([
+            torch_transforms.Resize(image_size,
+                        interpolation=InterpolationMode.BICUBIC),
+            torch_transforms.ToTensor(),
+            torch_transforms.Normalize(mean=data_mean, std=data_std)
+        ])
+
+        if   method == "train":
+            self.transform_main = train_transform
+        elif method == "infer":
+            self.transform_main = infer_transform
+        else : raise ValueError("Unknown Mode set only `train` or `infer` allowed")
+
+    def __call__(self, x):
+        y = self.transform_main(x)
+        return y
+
+    def get_composition(self):
+        return str(self.transform_main)

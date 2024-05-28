@@ -151,6 +151,9 @@ def getDataLoaders(cfg, center_index=None, type="train"):
     elif cfg.dataset == "ORGANMNIST":
         from datacode.orgmnist_jfed_data import getOrganMnistCLSLoaders as trainloader
         from datacode.orgmnist_jfed_data import getOrganMnistTESTLoader as testloader
+    elif cfg.dataset == "INATURE":
+        from datacode.inat_jfed_data import getINaturalistCLSLoaders as trainloader
+        from datacode.inat_jfed_data import getINaturalistTESTLoader as testloader
 
     elif cfg.dataset == "HUMBLE":
         from datacode.humble_jfed_data import getHumbleCLSLoaders as trainloader
