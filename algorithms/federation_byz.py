@@ -991,21 +991,15 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
         votedmean_dwvec, repute_info = self.sign_voted_mean(stacked_deltawvec)
 
-        moment_deltawvec = (1-self.mom_beta)*votedmean_dwvec + \
+        self.mom_deltawvec = (1-self.mom_beta)*votedmean_dwvec + \
                                 self.mom_beta*self.mom_deltawvec
-        new_wvec = self.aggwvec_tminus1 - moment_deltawvec.view(-1)
+        new_wvec = self.aggwvec_tminus1 - self.mom_deltawvec.view(-1)
 
         # new_wvec = self.aggwvec_tminus1 - votedmean_dwvec.view(-1)
         agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
-        ## free mem & reassign
-        del self.aggwvec_tminus1
         self.aggwvec_tminus1 = new_wvec.detach()
-        del self.mom_deltawvec
-        self.mom_deltawvec = moment_deltawvec.detach()
-        del wvecs
-        ## ^^^^^^^^^^^
 
         info_dict = {"client_clip_weightage": rad_info, "repute_score": repute_info}
 
