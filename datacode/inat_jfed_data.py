@@ -62,11 +62,12 @@ class INaturalist2017_JFedDataset(torch.utils.data.Dataset):
         elif split_type == "test":
             self.images_root = os.path.join(data_path, "test_images") ##override
             df2 = pd.read_csv(os.path.join(data_path, test_csv))
+            center = "all"
         else: raise("Unknown Split type specified ....", split_type)
 
         if len(self.images_root) ==0: raise ("No images path read, plase check path and folder name `train_images/test_images`")
 
-        self.total_centers = len(df2["center"].unique())
+        self.total_centers = df2["center"].nunique() if "center" in df2 else 1
         self.center = center
         self.label_type = label_type
         self.pooled = True if center == "all" else False

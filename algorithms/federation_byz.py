@@ -906,7 +906,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
     ## ----------------------- Reputation --------------------------------------
 
-    def _torch_kendallTauA(self, a, b):
+    def _torch_kendallLIKE(self, a, b):
         ## tau_a = (P - Q) / (N(N-1)/2)
         ## tau_b = (P - Q) / sqrt((P + Q + T) * (P + Q + U))
 
@@ -932,7 +932,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         score_list = []
         for i in range(sign_x.shape[0]):
             # score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
-            score = self._torch_kendallTauA(sign_x , sign_x[i].view(1,-1))
+            score = self._torch_kendallLIKE(sign_x , sign_x[i].view(1,-1))
             s = torch.sign(score).mean()
             score_list.append(s)
         current_repute = torch.vstack(score_list)

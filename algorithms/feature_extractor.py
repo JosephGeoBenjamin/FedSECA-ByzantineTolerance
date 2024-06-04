@@ -195,11 +195,11 @@ def load_DeitBackbone(arch, torch_pretrain= None, freeze= False):
         model_card_name = 'timm/deit_tiny_patch16_224.fb_in1k'
         outfeat_size = 192
 
-    if arch == "deit_small": #22.1M param
+    elif arch == "deit_small": #22.1M param
         model_card_name = 'timm/deit_small_patch16_224.fb_in1k'
         outfeat_size = 384
 
-    if arch == "deit_base":  #86.6M param
+    elif arch == "deit_base":  #86.6M param
         model_card_name = 'timm/deit_base_patch16_224.fb_in1k'
         outfeat_size = 768
 
@@ -211,11 +211,11 @@ def load_DeitBackbone(arch, torch_pretrain= None, freeze= False):
                                  pretrained=torch_pretrain,
                                 # num_classes=0,  # remove classifier nn.Linear
                                 )
-    raise "Classifier Not set"
+    backbone.head = nn.Identity()
     # freeze model
     if freeze: backbone = freeze_weights(backbone)
 
-    return backbone,
+    return backbone, outfeat_size
 
 
 ##==============================================================================

@@ -151,7 +151,7 @@ def getDataLoaders(cfg, center_index=None, type="train"):
     elif cfg.dataset == "ORGANMNIST":
         from datacode.orgmnist_jfed_data import getOrganMnistCLSLoaders as trainloader
         from datacode.orgmnist_jfed_data import getOrganMnistTESTLoader as testloader
-    elif cfg.dataset == "INATURE":
+    elif cfg.dataset == "INAT":
         from datacode.inat_jfed_data import getINaturalistCLSLoaders as trainloader
         from datacode.inat_jfed_data import getINaturalistTESTLoader as testloader
 
@@ -619,10 +619,12 @@ def simple_main(model_key=None, folder_suffix=""):
             state["global_model"] = global_model.state_dict() #updated after global round
             state["desyp_global_model"] = global_model_tminus1.state_dict() #global round begining
             ## Local-Models
-            #if not CFG.enable_weight_reinit: *->to save space
-            for id in traindozers.keys():
-                state[f"local_model_{id}"] = fed_locals[id].local_model.state_dict() #updated after local round
-                state[f"desyp_local_model_{id}"] = fed_locals[id].gdsyp_model.state_dict() #local round begining
+            ## NOTE: when personalised desyp_local_model would be different for each client
+            # if not CFG.enable_weight_reinit: *->to save space
+            for j, id in enumerate(traindozers.keys()):
+                # state[f"local_model_{id}"] = fed_locals[id].local_model.state_dict() #trained weights after local round
+                state[f"local_model_{id}"] = local_xcerpt_for_fed[j] #poisoned params after local round
+                state[f"desyp_local_model_{id}"] = fed_locals[id].gdsyp_model.state_dict() #local round begining;
             torch.save(state, CFG.gWeightPath +f'/checkpoint.pth')
 
 
