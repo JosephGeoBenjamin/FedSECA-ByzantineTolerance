@@ -931,8 +931,8 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
         score_list = []
         for i in range(sign_x.shape[0]):
-            # score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
-            score = self._torch_kendallLIKE(sign_x , sign_x[i].view(1,-1))
+            score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
+            # score = self._torch_kendallLIKE(sign_x , sign_x[i].view(1,-1))
             s = torch.sign(score).mean()
             score_list.append(s)
         current_repute = torch.vstack(score_list)
@@ -941,19 +941,20 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         # repute = torch.clamp(self.prior_repute, min=0)
 
         repute = torch.clamp(current_repute, min=0)
+        # repute = torch_F.softmax(repute, dim=0)
         return repute
 
 
     ## ----------------------- Merging --------------------------------------
 
     def sign_voted_mean(self, dw):
-        x = dw
+        x_raw = dw
 
         ## clamp the max grads
-        x = self._locwise_grad_clamper(x)
+        x = self._locwise_grad_clamper(x_raw)
 
         ## mag and sgn vectors -> for ties
-        magn_x = torch.abs(x)
+        magn_x = torch.abs(x_raw)
 
         ql = self.tensor_quantile(magn_x, self.tm_gamma, dim=1)
         ql = ql.view(-1, 1)
