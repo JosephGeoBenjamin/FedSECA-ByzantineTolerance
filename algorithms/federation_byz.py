@@ -954,17 +954,17 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         x = self._locwise_grad_clamper(x_raw)
 
         ## mag and sgn vectors -> for ties
-        magn_x = torch.abs(x_raw)
+        magn_xraw = torch.abs(x_raw)
 
-        ql = self.tensor_quantile(magn_x, self.tm_gamma, dim=1)
+        ql = self.tensor_quantile(magn_xraw, self.tm_gamma, dim=1)
         ql = ql.view(-1, 1)
-        x[magn_x<ql] = 0.0
-
-        sign_x = torch.sign(x)
+        x[magn_xraw<ql] = 0.0
 
         ## vote with repute
-        repute = self._reputation_score(sign_x)
+        sign_xraw = torch.sign(x_raw)
+        repute = self._reputation_score(sign_xraw)
 
+        sign_x = torch.sign(x)
         voted_sign = (sign_x*repute.view(-1,1)).sum(dim=0).view(1,-1)
 
         disjoint_select = (0<(x * voted_sign)).int() #select similar signed values
