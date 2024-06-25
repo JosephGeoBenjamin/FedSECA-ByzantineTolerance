@@ -208,6 +208,52 @@ class HumbleAuguments:
         return str(self.transform_main)
 
 
+##====================== EuroSAT Transforms =================================
+
+class EuroSATClassifyAuguments:
+
+    def __init__(self, method = "train", image_size = 224):
+        self.image_size =  image_size
+        print("IMAGESIZE SET::", self.image_size)
+
+        data_mean = IMAGENET_MEAN_STD[0]
+        data_std  = IMAGENET_MEAN_STD[1]
+
+        train_transform = torch_transforms.Compose([
+            torch_transforms.Resize(image_size,
+                                    interpolation=InterpolationMode.BICUBIC),
+            torch_transforms.RandomHorizontalFlip(p=0.5),
+            torch_transforms.RandomVerticalFlip(p=0.5),
+            torch_transforms.RandomRotation(degrees=(0, 180)),
+            torch_transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.2),
+            torch_transforms.RandomResizedCrop(size=(image_size, image_size), scale=(0.8, 1.0)),
+            torch_transforms.RandomApply([
+                torch_transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1))], p=0.5),
+            torch_transforms.ToTensor(),
+            torch_transforms.Normalize(mean=data_mean, std=data_std),
+        ])
+
+        infer_transform = torch_transforms.Compose([
+            torch_transforms.Resize(image_size,
+                        interpolation=InterpolationMode.BICUBIC),
+            torch_transforms.ToTensor(),
+            torch_transforms.Normalize(mean=data_mean, std=data_std)
+        ])
+
+        if   method == "train":
+            self.transform_main = train_transform
+        elif method == "infer":
+            self.transform_main = infer_transform
+        else : raise ValueError("Unknown Mode set only `train` or `infer` allowed")
+
+    def __call__(self, x):
+        y = self.transform_main(x)
+        return y
+
+    def get_composition(self):
+        return str(self.transform_main)
+
+
 ##====================== iNaturalist Transforms =============================
 
 class DeiTAuguments:

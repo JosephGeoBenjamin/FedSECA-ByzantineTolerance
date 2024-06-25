@@ -119,6 +119,9 @@ def getDataLoaders(cfg, center_index, type="train"):
     elif cfg.dataset == "INAT":
         from datacode.inat_jfed_data import getINaturalistCLSLoaders as trainloader
         from datacode.inat_jfed_data import getINaturalistTESTLoader as testloader
+    elif cfg.dataset == "EUROSAT":
+        from datacode.eurosat_jfed_data import getEuroSATCLSLoaders as trainloader
+        from datacode.eurosat_jfed_data import getEuroSATTESTLoader as testloader
 
     elif cfg.dataset == "HUMBLE":
         from datacode.humble_jfed_data import getHumbleCLSLoaders as trainloader
