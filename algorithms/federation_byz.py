@@ -926,13 +926,12 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         return taua
 
 
-    def _reputation_score(self, sign_x):
-        # mom_rep = 0.0 #fixed
+    def _grad_rating_score(self, sign_x):
+        ### score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
 
         score_list = []
         for i in range(sign_x.shape[0]):
-            score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
-            # score = self._torch_kendallLIKE(sign_x , sign_x[i].view(1,-1))
+            score = self._torch_kendallLIKE(sign_x , sign_x[i].view(1,-1))
             s = torch.sign(score).mean()
             score_list.append(s)
         current_repute = torch.vstack(score_list)
@@ -962,7 +961,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
         ## vote with repute
         sign_xraw = torch.sign(x_raw)
-        repute = self._reputation_score(sign_xraw)
+        repute = self._grad_rating_score(sign_xraw)
 
         sign_x = torch.sign(x)
         voted_sign = (sign_x*repute.view(-1,1)).sum(dim=0).view(1,-1)
