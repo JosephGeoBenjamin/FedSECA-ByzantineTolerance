@@ -906,38 +906,41 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
     ## ----------------------- Reputation --------------------------------------
 
-    def _torch_kendallLIKE(self, a, b):
-        ## tau_a = (P - Q) / (N(N-1)/2)
-        ## tau_b = (P - Q) / sqrt((P + Q + T) * (P + Q + U))
+    def _torch_Cordancy(self, a, b):
+        """
+        Kendall Formulation
+        tau_a = (P - Q) / (N(N-1)/2)
+        tau_b = (P - Q) / sqrt((P + Q + T) * (P + Q + U))
+        """
 
         a_sgn = torch.sign(a)
         b_sgn = torch.sign(b)
 
         sgn_pair = a_sgn * b_sgn
 
-        n_conc = (sgn_pair>0).sum(dim=1)
-        n_disc = (sgn_pair<0).sum(dim=1)
-        n = torch.prod(torch.tensor(b_sgn[0].shape)) #number of params
+        taua = sgn_pair.sum(dim=1) # unnormalised
 
-        # taua = (n_conc - n_disc) / torch.prod(torch.tensor(a_sgn.shape))
-        taua = (n_conc - n_disc) / (n_conc+n_disc)
-        # taua = (n_conc - n_disc) / (n*(n-1)/2)
+        # n_conc = (sgn_pair>0).sum(dim=1)
+        # n_disc = (sgn_pair<0).sum(dim=1)
+        # n = torch.prod(torch.tensor(b_sgn[0].shape)) #number of params
+        # taua = (n_conc - n_disc) / (n_conc+n_disc)
+
+
+        ## taua = (n_conc - n_disc) / torch.prod(torch.tensor(a_sgn.shape))
+        ## taua = (n_conc - n_disc) / (n*(n-1)/2)
 
         return taua
 
 
     def _grad_rating_score(self, sign_x):
-        ### score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
 
         score_list = []
         for i in range(sign_x.shape[0]):
-            score = self._torch_kendallLIKE(sign_x , sign_x[i].view(1,-1))
+            # score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
+            score = self._torch_Cordancy(sign_x , sign_x[i].view(1,-1))
             s = torch.sign(score).mean()
             score_list.append(s)
         current_repute = torch.vstack(score_list)
-
-        # self.prior_repute  = mom_rep*self.prior_repute + (1-mom_rep)*current_repute
-        # repute = torch.clamp(self.prior_repute, min=0)
 
         repute = torch.clamp(current_repute, min=0)
         # repute = torch_F.softmax(repute, dim=0)

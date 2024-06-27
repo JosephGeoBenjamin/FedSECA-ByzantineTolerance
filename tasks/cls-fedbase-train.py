@@ -478,6 +478,11 @@ def simple_main(model_key=None, folder_suffix=""):
 
     save_current_configs(CFG)
 
+    lutl.LOG2TXT(f"Pytorch version: {torch.__version__}\n"+ \
+                 f"cuda version: {torch.version.cuda}\n",
+                 CFG.gLogPath +'/misc.txt')
+
+
     ### PROTOCOL
     fedProtocol = getFedProtocol()
 
