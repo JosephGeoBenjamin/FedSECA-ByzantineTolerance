@@ -14,6 +14,7 @@ import algorithms.federation_ops as fedops
 """
 model_init/model_at_start -> model recieved init communication i.e at very first broadcast of params for training
 gmodel_state_tminus1 -> model recieved at Tth aggregation round from Server
+gwvec_tminus1_cpu -> model parameters as tensor at Tth aggregation round from server
 lmodel_state_tth -> gmodel_state_tminus1 updated for one set LocalRounds before sending to Server
 
 Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
@@ -25,7 +26,7 @@ class LabelFlipζAttack():
         # self.model_init = copy.deepcopy(model)
         print("This is a dummy init; LabelFlipζAttack for Training Phase attack")
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
         return lmodel_state_tth
 
 
@@ -37,7 +38,7 @@ class RandomizedζAttack():
 
         print("ATTACK: RandomizedζAttack")
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)
         weight_vec[:] = torch.rand(len(weight_vec))
         out_state = fedops.set_param_in_state(lmodel_state_tth, weight_vec)
@@ -53,7 +54,7 @@ class AffineζAttack():
 
         print("ATTACK: AffineζAttack", self.scaler)
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
         weight_vec = fedops.get_param_from_state(lmodel_state_tth)
         weight_vec[:]= self.scaler * weight_vec
         out_state = fedops.set_param_in_state(lmodel_state_tth, weight_vec)
@@ -78,7 +79,7 @@ class FangCraftedζAttack():
         print("ATTACK: FangCraftedζAttack", "Lambda", self.lmbd)
 
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
         local_states = []
         for kid in omniscience.keys(): # clientwise train info
             local_states.append(omniscience[kid]["model"].state_dict())
@@ -86,9 +87,12 @@ class FangCraftedζAttack():
 
         wvec_benign = fedops.get_param_from_state(copy.deepcopy(benign_state),
                                 keys_to_ignore=self.vec_state_ignore).to(self.device)
+        #TODO:remove
+        # gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
+        #                         keys_to_ignore=self.vec_state_ignore).to(self.device)
 
-        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
-                                keys_to_ignore=self.vec_state_ignore).to(self.device)
+        gwvec_tminus1 = gwvec_tminus1_cpu.to(self.device)
+
         S = (wvec_benign > gwvec_tminus1).long()
         S[S==0] = -1
         attack_wvec =  wvec_benign - (self.lmbd*S)
@@ -129,7 +133,7 @@ class ALIEζAttack():
         self.z_max = self.z_max + (random.random()-0.5)*0.1
         print("ATTACK: ALIEζAttack", "Z:", self.z_max)
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
 
         # Loop over benign weights
         benign_wvec_list = []
@@ -139,9 +143,11 @@ class ALIEζAttack():
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
 
-        gwvec_tminus1 = fedops.get_param_from_state(
-                    gmodel_state_tminus1,
-                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+        #TODO:remove
+        # gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
+        #                         keys_to_ignore=self.vec_state_ignore).to(self.device)
+
+        gwvec_tminus1 = gwvec_tminus1_cpu.to(self.device)
 
         benign_grads = gwvec_tminus1 - benign_wvec   ## ΔW
 
@@ -181,7 +187,7 @@ class XieIPMζAttack():
         print("ATTACK: XieIPMζAttack")
 
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
 
         # Loop over benign weights
         benign_wvec_list = []
@@ -191,8 +197,11 @@ class XieIPMζAttack():
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
 
-        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
-                                    keys_to_ignore=self.vec_state_ignore)
+        #TODO:remove
+        # gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
+        #                         keys_to_ignore=self.vec_state_ignore).to(self.device)
+
+        gwvec_tminus1 = gwvec_tminus1_cpu.to(self.device)
 
         delta_wvec = gwvec_tminus1 - benign_wvec # ΔW
         # Wt = Wt-1 - ε(-ΔW)
@@ -263,7 +272,7 @@ class MimicζAttack():
 
         return mi
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
         good_wvec_list = []
         for kid in omniscience.keys(): # clientwise train info
             if kid in self.honest_ranks:
@@ -322,7 +331,7 @@ class OzfaturaROPζAttack():
         self.z_max = self.z_max + (random.random()-0.5)*0.1
         print("ATTACK: OzfaturaROPζAttack", "Z", self.z_max)
 
-    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+    def modify(self, lmodel_state_tth, gwvec_tminus1_cpu, omniscience={}):
 
         local_states = []
         for kid in omniscience.keys(): # clientwise train info
@@ -331,9 +340,11 @@ class OzfaturaROPζAttack():
         benign_wvec = fedops.get_param_from_state(copy.deepcopy(benign_state),
                                     keys_to_ignore=self.vec_state_ignore).to(self.device)
 
-        gwvec_tminus1 = fedops.get_param_from_state(
-                    gmodel_state_tminus1,
-                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+        #TODO:remove
+        # gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
+        #                         keys_to_ignore=self.vec_state_ignore).to(self.device)
+
+        gwvec_tminus1 = gwvec_tminus1_cpu.to(self.device)
 
         benign_grads = gwvec_tminus1 - benign_wvec
 

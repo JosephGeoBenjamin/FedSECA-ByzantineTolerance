@@ -107,8 +107,11 @@ class NoGuardΞByzantine():
 
         if self.byz_way:
             with torch.no_grad():
+                gwvec_tminus1_cpu = fedops.get_param_from_state(self.gmodel_tminus1.state_dict(),
+                                keys_to_ignore=self.vec_state_ignore).to("cpu")
+
                 out_state = self.byz_way.modify(model.state_dict(),
-                                            self.gmodel_tminus1.state_dict(),
+                                            gwvec_tminus1_cpu,
                                             omniscience=zxs["omniscience"])
         else:
             out_state = model.state_dict()
@@ -173,6 +176,146 @@ class NoGuardΞByzantine():
 
         gset = {"model_state": agg_state, "client_select": select_info}
         return gset
+
+
+class NoGuardΞByzantineDecopl():
+    """
+    Prototype class for Decoupled FedAvg (very similar to decentralized mathematically)
+        In this each client will recieve differnt set of parameters at end
+        of each round, since averaging for models will vary for each client
+    In this, simply each model is given equal weightage, this just implementation place holder
+
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.dcmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.aggregator_func = self.__plain_fedavg #override this to introduce methods
+        print("DEFENSE: None Decoupled")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+
+    def _init_byzantiness(self):
+        byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
+        if self.id in byz_clients:
+            self.byz_way = get_attack_clsobj(self.byztn_cfg["byztn_method"])(
+                self.cfg, self.gmodel_init, self.device)
+
+            self.dcwvecs_all_tminus1_cpu = 0
+            print("BYZ METHOD: ", self.byztn_cfg["byztn_method"])
+
+
+    #-------- Client methods ----------
+
+    # @instancemethod #Locals calculation to send to Global
+    def synopsize_local(self, zxs): #used at end of local round at each client
+        """ zxs: {"model", }
+        Param Compression / Differential privacy or any other param modifications
+        are to be carried out here
+        """
+        lset = {}
+        model = fedops.model_copier(zxs["model"]) #after a local-rounds set
+
+        if self.byz_way:
+            out_state = self.byz_way.modify(model.state_dict(),
+                                            self.dcwvecs_all_tminus1_cpu,
+                                            omniscience=zxs["omniscience"])
+        else:
+            out_state = model.state_dict()
+
+        lset["model_state"] = out_state
+
+        return lset
+
+    #-------- Shared methods ----------
+
+    # @instancemethod #process global info for local use
+    def desynopsize_local(self, gset, device=None, model_struct=None): #used at end of local round at each client
+        """ model_struct: torch nn.module object
+            gset: global aggregations {"model", }
+        Decompression / local personalization of global model here
+        """
+        model_struct = self.gmodel_init if not model_struct else model_struct
+        if not device: device = next(model_struct.parameters()).device
+
+        ## since no compression or sketching used
+        model = copy.deepcopy(model_struct)
+        if not gset: return model, {}
+
+        ## NOTE: each client can/will access its own state_dicts alone
+        ## Omniscient attacker will access all the updates
+        ## general dict notion is for easier code design
+        state_cli = gset["model_states_cli"][f"client_{self.id}"]
+
+        model.load_state_dict(state_cli, strict=True)
+        model = model.to(device)
+
+        ghatch = {}
+        self.dcmodel_tminus1  = copy.deepcopy(model).to(self.device)
+
+        if self.byz_way:
+            dcwvecs = []
+            id_keys  = gset["model_states_cli"].keys()
+            for i in list(id_keys):
+                dcwvecs = fedops.get_param_from_state(gset["model_states_cli"][i],
+                            keys_to_ignore = self.vec_state_ignore).to("cpu")
+            self.dcwvecs_all_tminus1_cpu = torch.vstack(dcwvecs)
+
+        return model, ghatch
+
+
+    #-------- Server methods ----------
+
+    def __plain_fedavg(self, lsets):
+        ## Regular
+        # local_states = []
+        # for ls in lsets:
+        #     local_states.append(ls["model_state"])
+        # agg_states = fedops.global_average_statedict(local_states)
+
+
+        ##Vectorized
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        agg_states = fedops.set_param_in_state(state_dict_struct, stacked_wvec.mean(dim=0),
+                                              keys_to_ignore=self.vec_state_ignore)
+
+
+        agg_states_cli = { f"client_{i}": copy.deepcopy(agg_states)
+                          for i in range(len(lsets))}
+        agg_states_cli.update({"client_G": copy.deepcopy(agg_states)}) #Global Model
+
+        info_dict = {"client_weightage":[[1/len(lsets)]*len(lsets)]*len(lsets)}
+        return agg_states_cli, info_dict
+
+
+    # @instancemethod  #Global calculation to send to locals
+    def aggregate_globally(self, lsets, device=None): #used at begining of local round central
+        """ Return: aggregated stat
+        """
+        with torch.no_grad():
+            agg_states_cli, select_info = self.aggregator_func(lsets)
+
+        ## NOTE: typically each client will have access only to its model params
+        ## but returning entire dict for sake of easier code design
+        gset = {"model_states_cli": agg_states_cli, "client_select": select_info}
+        return gset
+
 
 
 
