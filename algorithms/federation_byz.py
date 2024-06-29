@@ -1036,12 +1036,17 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
     def _locwise_grad_clamper(self, xs):
         """
-        Median Clamping
+        Norm Clipping & Median Clamping
         x : vectors   :shp:[K, len_parameters]
         """
 
-        med_mag,_ = torch.median(torch.abs(xs), dim=0)
+        norms = torch.norm(xs, dim=1).view(-1, 1)
+        med_norm, _ = torch.median(norms, dim=0)
+        norm_clip = med_norm/norms
+        norm_clip[norm_clip>1.0] = 1.0
+        xs_clipped = xs * norm_clip.view(-1, 1)
 
+        med_mag,_ = torch.median(torch.abs(xs_clipped), dim=0)
         vs = torch.clamp(xs, max=med_mag, min=-med_mag)
 
         return vs
@@ -1079,8 +1084,8 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
         score_list = []
         for i in range(sign_x.shape[0]):
-            # score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
-            score = self._torch_Cordancy(sign_x , sign_x[i].view(1,-1))
+            score = torch_F.cosine_similarity(sign_x , sign_x[i].view(1,-1))
+            # score = self._torch_Cordancy(sign_x , sign_x[i].view(1,-1))
             s = torch.sign(score).mean()
             score_list.append(s)
         current_repute = torch.vstack(score_list)
