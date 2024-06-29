@@ -673,8 +673,11 @@ class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
         quotas = vec_len * rp_scores / torch.max(rp_scores)
 
         for j in range(client_count):
-            topk_values, _ = torch.topk(aggdelta_wvec.abs(), int(quotas[j]))
-            kth_value = topk_values.squeeze()[-1]
+            topk_values, _ = torch.topk(aggdelta_wvec.abs(),
+                                    k= min(int(quotas[j]), vec_len) )
+
+            if len(topk_values) ==0:  kth_value = 0
+            else:  kth_value = topk_values.squeeze()[-1]
             mask = (aggdelta_wvec.abs() >= kth_value)
 
             sparsified_vecs[j][:] = aggdelta_wvec* mask.float()
@@ -735,6 +738,8 @@ class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
                                                 keys_to_ignore=self.vec_state_ignore)
         agg_states_cli.update({"client_G": copy.deepcopy(agg_state_i)}) #Global Model
 
+
+        self.stacked_wvec_tminus1 = fair_wvec_send
 
         info_dict = {"client_weightage":self.repute_scores.tolist()}
         return agg_states_cli, info_dict
