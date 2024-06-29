@@ -78,6 +78,13 @@
     },
 
     {
+        "defense_method" : "ReputeRFFLΞByzantineDecopl",
+        "gradnorm_gamma" : 0.5,
+        "repute_scale_alpha": 0.95,
+        "repute_thresh_proportion": 0.3333
+    },
+
+    {
         "defense_method" : "ClippingΞByzantine",
         "clip_radius"  : 100,
         "clip_iters"   : 3

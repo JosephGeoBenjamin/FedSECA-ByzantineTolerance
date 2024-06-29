@@ -113,6 +113,7 @@ class NoGuardΞByzantine():
                 out_state = self.byz_way.modify(model.state_dict(),
                                             gwvec_tminus1_cpu,
                                             omniscience=zxs["omniscience"])
+                del gwvec_tminus1_cpu
         else:
             out_state = model.state_dict()
 
@@ -231,6 +232,7 @@ class NoGuardΞByzantineDecopl():
             out_state = self.byz_way.modify(model.state_dict(),
                                             self.dcwvecs_all_tminus1_cpu,
                                             omniscience=zxs["omniscience"])
+            del self.dcwvecs_all_tminus1_cpu
         else:
             out_state = model.state_dict()
 
@@ -618,6 +620,126 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
         info_dict = {"client_weightage":betas_list}
         return agg_state, info_dict
+
+##==============================================================================
+
+class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
+    """
+    reference: Xu, X., & Lyu, L. A reputation mechanism is all you need: Collaborative fairness and adversarial robustness in federated learning.
+    paper: https://arxiv.org/pdf/2011.10464
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.dcmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved by client at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+            self.black_list_idx = []
+
+        self.aggregator_func = self.__robust_fair_aggregate
+        self.gradnorm_gamma  = torch.tensor(self.defense_cfg["gradnorm_gamma"]) # paper 0.15 for cifar
+        self.repute_alpha  = self.defense_cfg["repute_scale_alpha"] # paper 0.95
+        self.repute_beta  = self.defense_cfg["repute_thresh_proportion"] *(1/self.num_client_k) # paper 1/3N
+
+        print("Defense: Repute Robust Fair FL")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+
+    def init_stacked_wvecs(self, model):
+        self.stacked_wvec_tminus1 = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore)
+        self.repute_scores = torch.ones(self.num_client_k).to(self.device) / self.num_client_k
+
+
+    #-------- Server methods ----------
+
+    def fairness_sparsify(self, aggdelta_wvec, scaled_stacked_deltawvec, rp_scores):
+        vec_len = scaled_stacked_deltawvec[0].shape[-1]
+        client_count = scaled_stacked_deltawvec.shape[0]
+        sparsified_vecs = torch.zeros_like(scaled_stacked_deltawvec)
+
+        quotas = vec_len * rp_scores / torch.max(rp_scores)
+
+        for j in range(client_count):
+            topk_values, _ = torch.topk(aggdelta_wvec.abs(), int(quotas[j]))
+            kth_value = topk_values.squeeze()[-1]
+            mask = (aggdelta_wvec.abs() >= kth_value)
+
+            sparsified_vecs[j][:] = aggdelta_wvec* mask.float()
+
+        sparsified_vecs = sparsified_vecs - scaled_stacked_deltawvec
+        return sparsified_vecs
+
+    def __robust_fair_aggregate(self, lsets):
+        ## Regular
+        # local_states = []
+        # for ls in lsets:
+        #     local_states.append(ls["model_state"])
+        # agg_states = fedops.global_average_statedict(local_states)
+
+
+        ##Vectorized
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = stacked_wvec - self.stacked_wvec_tminus1 # ΔW = -ηg
+
+        norms_delta = stacked_deltawvec.norm(dim=1).view(-1,1)
+
+        ## aggregation
+        scaled_stacked_deltawvec = self.repute_scores.view(-1,1) * stacked_deltawvec
+        aggdelta_wvec = scaled_stacked_deltawvec * (self.gradnorm_gamma / norms_delta)
+        aggdelta_wvec = aggdelta_wvec.sum(dim=0, keepdim=True)
+
+        ## repute score estimation
+        repute_esti = torch_F.cosine_similarity(aggdelta_wvec, stacked_deltawvec)
+        repute_esti[self.repute_scores==0] = 0.0 # once removed client will never be included
+
+        self.repute_scores = self.repute_alpha*self.repute_scores + \
+                            repute_esti*(1-self.repute_alpha)
+        self.repute_scores = self.repute_scores / self.repute_scores.sum() # normalize to sum 1
+
+        low_rep_locs = torch.nonzero(self.repute_scores.view(-1) < self.repute_beta)
+
+        self.repute_scores[low_rep_locs] = 0.0
+
+        ## personalised sparsification
+        fair_stacked_deltawvec = self.fairness_sparsify(aggdelta_wvec,
+                            scaled_stacked_deltawvec, self.repute_scores)
+
+        fair_wvec_send = stacked_wvec + fair_stacked_deltawvec
+
+
+        ## send back to clients dict
+        agg_states_cli = {}
+        for i in range(stacked_wvec.shape[0]):
+            agg_state_i = fedops.set_param_in_state(state_dict_struct, fair_wvec_send[i],
+                                                keys_to_ignore=self.vec_state_ignore)
+            agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_state_i)})
+
+        agg_state_i = fedops.set_param_in_state(state_dict_struct, fair_wvec_send.mean(dim=0),
+                                                keys_to_ignore=self.vec_state_ignore)
+        agg_states_cli.update({"client_G": copy.deepcopy(agg_state_i)}) #Global Model
+
+
+        info_dict = {"client_weightage":self.repute_scores.tolist()}
+        return agg_states_cli, info_dict
+
+
 
 ##==============================================================================
 
