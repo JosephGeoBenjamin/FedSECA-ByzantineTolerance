@@ -26,7 +26,7 @@ print(f"cuda version: {torch.version.cuda}")
 ##============================= Configure and Setup ============================
 
 # Enable CODES for analysing model parameters and log their statitics
-ANALYSE_MODELS = True
+ANALYSE_MODELS = False
 # To enable CODES for seperate validation routine based on local clients data
 # user has to specify validation split in data csv, if not will yield empty results
 VALIDATION = False
@@ -839,23 +839,7 @@ if __name__ == '__main__':
         else:
             train_runner()
 
-    ##-----
-
-    # def sketch_compressions_wrap():
-
-    #     ## HASHes set at 12
-    #     compressions = {"1.5E": 8, #expand                                      #==> Set as needed
-    #                     "2x": 24, "4x": 48, "8x": 96, "16x":198
-    #                     }
-
-    #     for cx, sx in compressions.items():
-    #         CFG.sketch_compress_factor = sx  #~~~~
-    #         xtitle = f"/{list(filter(None, CFG.checkpoint_dir.split('/')))[-1]}-{cx}/"
-    #         print(xtitle)
-    #         iided_vs_simple_wrap(xtitle)
-
     ###----------------------------------
 
     # train_runner()
     iided_vs_simple_wrap()
-    # sketch_compressions_wrap()
