@@ -808,7 +808,7 @@ if __name__ == '__main__':
 
         if CFG.dataset == "CIFAR":
             if CFG.dirichlet_alpha is False:
-                dquantity = [ 100, 1, 0]                                    #==> Set as needed
+                dquantity = [1]                                    #==> Set as needed
             else: dquantity = [CFG.dirichlet_alpha]
 
             if CFG.iid_ness is False:
