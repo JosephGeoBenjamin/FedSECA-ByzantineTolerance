@@ -14,7 +14,7 @@ import algorithms.federation_ops as fedops
 """
 model_init/model_at_start -> model recieved init communication i.e at very first broadcast of params for training
 gmodel_state_tminus1 -> model recieved at Tth aggregation round from Server
-lmodel_state_tth -> gmodel_state_tminus1 updated for one set LocalRounds before sending to Server
+lmodel_state_tth -> one set LocalRounds on gmodel_state_tminus1 before sending to Server
 
 Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
 """
@@ -289,7 +289,7 @@ class MimicζAttack():
 
 
 
-## TODO: Fix the byzantine tolerance
+## TODO: Fix and check the effect on byzantine tolerance
 class OzfaturaROPζAttack():
     """
     Reference: Byzantines can also Learn from History: Fall of Centered Clipping in Federated Learning
