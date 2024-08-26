@@ -623,6 +623,8 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
 ##==============================================================================
 
+## TODO: Fix RFFL code to work in shared global model setting
+## actual RFFL method is for Personalised models
 class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
     """
     reference: Xu, X., & Lyu, L. A reputation mechanism is all you need: Collaborative fairness and adversarial robustness in federated learning.
@@ -682,7 +684,7 @@ class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
 
             sparsified_vecs[j][:] = aggdelta_wvec* mask.float()
 
-        sparsified_vecs = sparsified_vecs - scaled_stacked_deltawvec
+        sparsified_vecs = sparsified_vecs + scaled_stacked_deltawvec
         return sparsified_vecs
 
     def __robust_fair_aggregate(self, lsets):
@@ -702,6 +704,7 @@ class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
         stacked_deltawvec = stacked_wvec - self.stacked_wvec_tminus1 # ΔW = -ηg
 
         norms_delta = stacked_deltawvec.norm(dim=1).view(-1,1)
+        repute_sum_tminus1 = self.repute_scores.sum()
 
         ## aggregation
         scaled_stacked_deltawvec = self.repute_scores.view(-1,1) * stacked_deltawvec
@@ -733,6 +736,8 @@ class ReputeRFFLΞByzantineDecopl(NoGuardΞByzantineDecopl):
             agg_state_i = fedops.set_param_in_state(state_dict_struct, fair_wvec_send[i],
                                                 keys_to_ignore=self.vec_state_ignore)
             agg_states_cli.update({f"client_{i}": copy.deepcopy(agg_state_i)})
+
+        g_store_wvecs = (self.stacked_wvec_tminus1 + aggdelta_wvec).sum(dim=0) / repute_sum_tminus1
 
         agg_state_i = fedops.set_param_in_state(state_dict_struct, fair_wvec_send.mean(dim=0),
                                                 keys_to_ignore=self.vec_state_ignore)
@@ -990,6 +995,8 @@ class SequentialBucketingΞByzantine(ClippingΞByzantine):
 
 class TiesMergeΞByzantine(NoGuardΞByzantine):
     """
+    Variant of Ties-Merging adopted for Byantine tolerance
+    This is basically SignSGD-MV for real valued gradients
     reference: Yadav et al. Ties-merging: Resolving interference when merging models - Neurips2024 .
     """
 
