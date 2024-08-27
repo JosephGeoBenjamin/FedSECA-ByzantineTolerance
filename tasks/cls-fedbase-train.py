@@ -805,10 +805,11 @@ if __name__ == '__main__':
 
         default_partition_type = "aleph" # aleph / iid
 
-
+        # IID increases with x, y, z | created with moduloed on 5 clients on dirichlet of 100, 1, 0
+        # used y for main experiments
         if CFG.dataset == "CIFAR":
             if CFG.dirichlet_alpha is False:
-                dquantity = [1]                                    #==> Set as needed
+                dquantity = ["y"]                                    #==> Set as needed
             else: dquantity = [CFG.dirichlet_alpha]
 
             if CFG.iid_ness is False:
