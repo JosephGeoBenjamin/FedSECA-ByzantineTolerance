@@ -1,0 +1,7 @@
+{
+    "defense_cfg":{
+        "defense_method" : "TiesMergeΞByzantine",
+        "tm_beta": 0.9
+    }
+
+}

@@ -1,0 +1,8 @@
+{
+    "defense_cfg":{
+        "defense_method" : "GeoMedianRFAΞByzantine",
+        "stability_nu"   : 1e-6,
+        "budget_iter_r"  : 3
+    }
+
+}

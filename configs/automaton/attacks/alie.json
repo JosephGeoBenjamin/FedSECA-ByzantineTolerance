@@ -1,0 +1,7 @@
+{
+    "byztn_cfg":{
+        "byztn_clients": [3,4],
+        "byztn_method" : "ALIEζAttack",
+        "z_max": 1.0
+    }
+}

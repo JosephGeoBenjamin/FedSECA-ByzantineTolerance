@@ -1,0 +1,8 @@
+{
+    "defense_cfg":{
+        "defense_method" : "FedRiseV2ΞByzantine",
+        "tm_gamma"       : 0.9,
+        "moment_beta"    : 0.5
+    }
+
+}

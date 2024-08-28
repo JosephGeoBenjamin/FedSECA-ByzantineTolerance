@@ -1,0 +1,6 @@
+{
+    "byztn_cfg":{
+        "byztn_clients": [3,4],
+        "byztn_method" : "LabelFlipζAttack"
+    }
+}

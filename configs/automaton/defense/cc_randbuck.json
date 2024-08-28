@@ -1,0 +1,9 @@
+{
+    "defense_cfg":{
+        "defense_method" : "RandomBucketingΞByzantine",
+        "clip_radius"    : 100,
+        "clip_iters"     : 3,
+        "bucket_size_s"  : 2
+    }
+
+}

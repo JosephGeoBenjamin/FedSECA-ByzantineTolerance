@@ -1,0 +1,59 @@
+{
+    "dataset"       : "CIFAR",
+    "dataset_type"  : "cifar10",
+    "label_type"    : "label",
+    "data_root_path": "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar10-jfed/",
+    "data_centers_count": 5,
+    "test_partitions"   :1,
+    "center_inclusion_filter":[],
+
+    "dirichlet_alpha" : false,
+    "iid_ness"        : false,
+
+    "update_mode"   :"epoch",
+    "global_rounds" : 50,
+
+    "image_size": 224,
+    "batch_size": 64,
+    "workers"   : 4,
+
+    "learning_rate": 1e-3,
+    "weight_decay" : 1e-06,
+    "enable_scheduler": false,
+
+    "enable_weight_reinit": true,
+    "fed_approach" : "fedavg+byzantine",
+    "enable_proxreg": false,
+    "proxreg_mu"    : 0.0,
+
+    "defense_cfg":{
+    },
+
+    "byztn_cfg":{
+    },
+
+    "reg_method"   : "NONE",
+    "reg_coeff"    : 0.0,
+
+    "featx_arch"    : "resnet18",
+    "featx_pretrain": "NONE",
+
+    "featx_dropout" : 0.0,
+    "featx_freeze"  : false,
+    "featx_bnorm"   : false,
+
+    "clsfy_layers"  : [10],
+    "clsfy_dropout" : 0.0,
+
+    "print_freq_lstep"  : 0,
+    "ckpt_freq_Gstep"   : 1,
+    "test_last_E_epochs": 0,
+    "test_trend_full"   : true,
+
+    "checkpoint_dir": "dummy_path",
+    "resume_training": false,
+
+    "override_csv" : "cifar10_fedrise_train_split.csv",
+    "hello_override_csv" : "cifar10_train_data-noval.csv"
+
+}

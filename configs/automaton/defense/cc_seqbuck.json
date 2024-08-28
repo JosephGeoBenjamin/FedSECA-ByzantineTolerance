@@ -1,0 +1,9 @@
+{
+    "defense_cfg":{
+        "defense_method" : "SequentialBucketingΞByzantine",
+        "clip_radius"    : 100,
+        "clip_iters"     : 1,
+        "bucket_size_s"  : 2
+    }
+
+}

@@ -1,0 +1,7 @@
+{
+    "byztn_cfg":{
+        "byztn_clients": [3,4],
+        "byztn_method" : "XieIPMζAttack",
+        "epsilon": 1.3
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "defense_cfg":{
+        "defense_method" : "CoordinateWiseCentralityΞByzantine",
+        "approach"        : "trimmedmean",
+        "cwtm_beta"      : 1
+    }
+
+}

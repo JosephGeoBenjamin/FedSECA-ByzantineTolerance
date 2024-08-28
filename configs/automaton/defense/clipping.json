@@ -1,0 +1,8 @@
+{
+    "defense_cfg":{
+        "defense_method" : "ClippingΞByzantine",
+        "clip_radius"    : 100,
+        "clip_iters"     : 3
+    }
+
+}

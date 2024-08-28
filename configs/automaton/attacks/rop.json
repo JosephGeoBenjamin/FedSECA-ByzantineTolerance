@@ -1,0 +1,10 @@
+{
+    "byztn_cfg":{
+        "byztn_clients": [3,4],
+        "byztn_method" : "OzfaturaROPζAttack",
+        "pi_angle": 90 ,
+        "rho_reloc": 1 ,
+        "lambda_refwt": 0.9,
+        "z_max": 0.5
+    }
+}
