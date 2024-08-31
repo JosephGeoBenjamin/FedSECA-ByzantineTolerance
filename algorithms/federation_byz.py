@@ -855,9 +855,9 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
     ##--------------------
     def init_stacked_wvecs(self, model):
         wvec = fedops.get_param_from_state(model.state_dict(),
-                        keys_to_ignore=self.vec_state_ignore)
+                        keys_to_ignore=self.vec_state_ignore).to(self.device)
         self.aggwvec_tminus1 = wvec
-        self.mom_deltawvec = torch.zeros_like(wvec)
+        self.mom_deltawvec = torch.zeros_like(wvec).to(self.device)
         # self.error_deltawvec = torch.zeros_like(wvec)
         # self.prior_repute = 0
 
@@ -988,7 +988,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         rad_info = None
 
         wvecs =[fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore=self.vec_state_ignore)
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
