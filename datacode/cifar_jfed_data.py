@@ -123,21 +123,21 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
 
 
         cls_count = len(grouped_data)
-        assert cls_count >= self.total_centers, (f"Total Class {cls_count} < Total Centers {self.total_centers}; "
+        if self.iid_ness != "full":
+            assert cls_count >= self.total_centers, (f"Total Class {cls_count} < Total Centers {self.total_centers}; "
                                             "This will result in unexpected behaviour in non/semi iid-ness modes")
 
+        if self.iid_ness == "full":
+            for i, gd in enumerate(grouped_data):
+                client_dataset.extend(gd[self.center::self.total_centers])
 
-        if self.iid_ness == "non":
+
+        elif self.iid_ness == "non":
             # if total center > classes then will return empty partitions
             # for all centers above the class count
             for i, gd in enumerate(grouped_data):
                 if (i % self.total_centers) == self.center:
                     client_dataset.extend(gd)
-
-
-        elif self.iid_ness == "full":
-            for i, gd in enumerate(grouped_data):
-                client_dataset.extend(gd[self.center::self.total_centers])
 
 
         elif self.iid_ness == "semi-mix":
