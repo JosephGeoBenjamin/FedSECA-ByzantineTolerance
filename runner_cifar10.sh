@@ -14,7 +14,7 @@ SEED=73
 SAVEROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/DEBUGGER/cifar10-rand/
 EXP_JSON=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/automaton/cifar10-rand.json
 
-export CUDA_VISIBLE_DEVICES=5
+export CUDA_VISIBLE_DEVICES=0
 
 ##==============================================================================
 

@@ -90,6 +90,8 @@ parser.add_argument('--attack-json', type=str, metavar='JSON',
 parser.add_argument('--defense-json', type=str, metavar='JSON',
     help='Load Defense setting which overrides prior values')
 
+parser.add_argument('--data-centers-count', type=int, metavar='Int',
+    help='Number of federated clients for training')
 
 parser.add_argument('--seed', type=int, metavar='Int',
     help='Seed to be set for training')
@@ -463,7 +465,7 @@ def simple_main(model_key=None, folder_suffix=""):
     ### SETUP
     print("SEED:", CFG.seed)
     rutl.START_SEED(CFG.seed)
-    gpuid_generator = fedutl.gpu_devices_generator()
+    gpuid_generator = fedutl.GPUDeviceGenerator()
 
     # -- log path --
     if model_key: folder_suffix +=f"/{model_key}/"
@@ -490,7 +492,9 @@ def simple_main(model_key=None, folder_suffix=""):
     traindozers, validdozers = getDataLoaders(CFG, type="train")
 
     ### MODEL, OPTIM
-    g_device = next(gpuid_generator)
+    # g_device = next(gpuid_generator)
+    # gpuid_generator.pop_device(g_device) # remove the server gpu from available gpus
+    g_device = torch.device("cpu")
     global_model = getModel(model_key, g_device)
     lossfn = getLossFunc()
 
@@ -803,7 +807,12 @@ if __name__ == '__main__':
     def iided_vs_simple_wrap(xtitle=""):
         """For running different alephs/iidness in cifar100 or mnists"""
 
-        default_partition_type = "aleph" # aleph / iid
+        if CFG.__dict__.get("fed_partition_type", None):
+            default_partition_type = CFG.fed_partition_type
+        else:
+            default_partition_type = "aleph" # aleph / iid
+        print(f"Federation data Partitioning used is: {default_partition_type}")
+
 
         # IID increases with x, y, z | created with moduloed on 5 clients on dirichlet of 100, 1, 0
         # used y for main experiments
