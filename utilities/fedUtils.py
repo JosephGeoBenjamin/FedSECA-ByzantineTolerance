@@ -13,6 +13,32 @@ def gpu_devices_generator():
         yield gpu_devices[index]
         index = (index + 1) % len(gpu_devices)
 
+class GPUDeviceGenerator:
+    def __init__(self):
+        gpu_ids = os.environ.get('CUDA_VISIBLE_DEVICES')
+        gpu_ids = "0" if gpu_ids is None else gpu_ids.split(",")
+        self.gpu_devices = [torch.device(f"cuda:{gid}") for gid in range(len(gpu_ids))]
+        self.index = 0
+        print("Enabled CUDA Devices:", gpu_ids)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.gpu_devices:
+            raise StopIteration("No more GPU devices available.")
+        device = self.gpu_devices[self.index]
+        self.index = (self.index + 1) % len(self.gpu_devices)
+        return device
+
+    def pop_device(self, device):
+        if device in self.gpu_devices:
+            self.gpu_devices.remove(device)
+            self.index = self.index % len(self.gpu_devices) if self.gpu_devices else 0
+            print(f"Device {device} popped. Remaining devices: {self.gpu_devices}")
+        else:
+            print(f"Device {device} not found in the list.")
+
 
 
 def find_layerwise_weight_difference(m1, m2):
