@@ -82,7 +82,9 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
 
             if (dirichlet_alpha is not None) and (dirichlet_alpha is not False):
                 print("Using DIRICHLET based labelwise Split !!!")
-                df2["center"] = df2[f"{dirichlet_alpha}_alpha_id"].apply(self._remap_values)
+                df2["center"] = df2[f"{dirichlet_alpha}_alpha_id"]
+                df2["center"] = df2["center"].apply(self._remap_values,
+                                                     max_value=df2["center"].max())
                 df2 = df2[df2["center"] == center]
 
             elif (iid_ness is not None) and (iid_ness is not False):
@@ -121,21 +123,21 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
 
 
         cls_count = len(grouped_data)
-        assert cls_count >= self.total_centers, (f"Total Class {cls_count} < Total Centers {self.total_centers}; "
+        if self.iid_ness != "full":
+            assert cls_count >= self.total_centers, (f"Total Class {cls_count} < Total Centers {self.total_centers}; "
                                             "This will result in unexpected behaviour in non/semi iid-ness modes")
 
+        if self.iid_ness == "full":
+            for i, gd in enumerate(grouped_data):
+                client_dataset.extend(gd[self.center::self.total_centers])
 
-        if self.iid_ness == "non":
+
+        elif self.iid_ness == "non":
             # if total center > classes then will return empty partitions
             # for all centers above the class count
             for i, gd in enumerate(grouped_data):
                 if (i % self.total_centers) == self.center:
                     client_dataset.extend(gd)
-
-
-        elif self.iid_ness == "full":
-            for i, gd in enumerate(grouped_data):
-                client_dataset.extend(gd[self.center::self.total_centers])
 
 
         elif self.iid_ness == "semi-mix":
@@ -207,8 +209,8 @@ class Cifar_JFedDataset(torch.utils.data.Dataset):
 
         return image, target
 
-    def _remap_values(self, value):
-        return int(value // (100/self.total_centers))
+    def _remap_values(self, value, max_value=100): #100 for Google FedVision dataset
+        return int(value // (max_value/self.total_centers))
 
 
 
