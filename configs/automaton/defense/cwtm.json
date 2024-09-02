@@ -2,7 +2,7 @@
     "defense_cfg":{
         "defense_method" : "CoordinateWiseCentralityΞByzantine",
         "approach"        : "trimmedmean",
-        "cwtm_beta"      : 1
+        "cwtm_beta_count_oneside"      : 1
     }
 
 }

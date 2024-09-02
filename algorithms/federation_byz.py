@@ -274,8 +274,8 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        # number of byzzantines to ignore
-        self.cwtm_beta = self.defense_cfg.get("cwtm_beta") #B; should hold K-2B > 0
+        # number of byzzantines to ignore; here B values on each side is ignored
+        self.cwtm_beta = self.defense_cfg.get("cwtm_beta_count_oneside") #B; should hold K-2B > 0
         self.approach  = self.defense_cfg["approach"]
         self.aggregator_func = self.__coordinatewise_aggregation
 
