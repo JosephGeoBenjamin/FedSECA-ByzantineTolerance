@@ -38,7 +38,7 @@ class RandomizedζAttack():
         print("ATTACK: RandomizedζAttack")
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
-        weight_vec = fedops.get_param_from_state(lmodel_state_tth)
+        weight_vec = fedops.get_param_from_state(lmodel_state_tth).to(self.device)
         weight_vec[:] = torch.rand(len(weight_vec))
         out_state = fedops.set_param_in_state(lmodel_state_tth, weight_vec)
 
@@ -54,7 +54,7 @@ class AffineζAttack():
         print("ATTACK: AffineζAttack", self.scaler)
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
-        weight_vec = fedops.get_param_from_state(lmodel_state_tth)
+        weight_vec = fedops.get_param_from_state(lmodel_state_tth).to(self.device)
         weight_vec[:]= self.scaler * weight_vec
         out_state = fedops.set_param_in_state(lmodel_state_tth, weight_vec)
 
@@ -119,7 +119,7 @@ class ALIEζAttack():
 
         ## this is global common start point
         self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
-                                    keys_to_ignore=self.vec_state_ignore)
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
         if not self.z_max:
             s = np.floor(n / 2 + 1) - m
@@ -175,7 +175,7 @@ class XieIPMζAttack():
 
         ## this is global common start point
         self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
-                                    keys_to_ignore=self.vec_state_ignore)
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
         self.epsilon = self.epsilon + (random.random()-0.5)*0.1
         print("ATTACK: XieIPMζAttack")
@@ -192,7 +192,7 @@ class XieIPMζAttack():
         benign_wvec = torch.vstack(benign_wvec_list)
 
         gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
-                                    keys_to_ignore=self.vec_state_ignore)
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
         delta_wvec = gwvec_tminus1 - benign_wvec # ΔW
         # Wt = Wt-1 - ε(-ΔW)
@@ -225,7 +225,7 @@ class MimicζAttack():
         self.vec_state_ignore = ["num_batches_tracked"]
         ## this is global common start point
         self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
-                                    keys_to_ignore=self.vec_state_ignore)
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
         self.t  = 0
         self.target_rank = None
@@ -312,7 +312,7 @@ class OzfaturaROPζAttack():
 
         ## this is global common start point
         self.gwvec_tminus2:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
-                                    keys_to_ignore=self.vec_state_ignore)
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
 
         if not self.z_max:
             s = np.floor(n / 2 + 1) - m

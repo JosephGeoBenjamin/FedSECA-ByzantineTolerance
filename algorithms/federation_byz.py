@@ -153,7 +153,7 @@ class NoGuardΞByzantine():
         ## Vectorized
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
         wvecs = [fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore = self.vec_state_ignore)
+                    keys_to_ignore = self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
@@ -218,7 +218,7 @@ class KrumΞByzantine(NoGuardΞByzantine):
         #             for l in lsets]
 
         wvecs = [fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore = self.vec_state_ignore)
+                    keys_to_ignore = self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         K = len(lsets) # num_client_k
@@ -274,8 +274,8 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
         self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
         self.vec_state_ignore = ["num_batches_tracked"]
 
-        # number of byzzantines to ignore; here B values on each side is ignored
-        self.cwtm_beta = self.defense_cfg.get("cwtm_beta_count_oneside") #B; should hold K-2B > 0
+        # number of byzzantines to ignore
+        self.cwtm_beta = self.defense_cfg.get("cwtm_beta") #B; should hold K-2B > 0
         self.approach  = self.defense_cfg["approach"]
         self.aggregator_func = self.__coordinatewise_aggregation
 
@@ -303,7 +303,7 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
         #             for l in lsets]
 
         wvecs = [fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore = self.vec_state_ignore)
+                    keys_to_ignore = self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         K = len(lsets) # num_client_k
@@ -375,7 +375,7 @@ class CopodDosΞByzantine(NoGuardΞByzantine):
         # sfully_wvec = torch.vstack(fully_wvecs)
 
         wvecs = [fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore = self.vec_state_ignore)
+                    keys_to_ignore = self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
@@ -443,12 +443,12 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
     def __geomed_aggregation(self, lsets):
         state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
-        # fully_wvecs = [fedops.get_param_from_state(l["model_state"])
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"]).to(self.device)
         #             for l in lsets]
         # sfully_wvec = torch.vstack(fully_wvecs)
 
         wvecs = [fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore = self.vec_state_ignore)
+                    keys_to_ignore = self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
@@ -517,7 +517,7 @@ class ClippingΞByzantine(NoGuardΞByzantine):
 
     def init_stacked_wvecs(self, model):
         wvec = fedops.get_param_from_state(model.state_dict(),
-                        keys_to_ignore=self.vec_state_ignore)
+                        keys_to_ignore=self.vec_state_ignore).to(self.device)
         self.aggwvec_tminus1 = wvec
         self.mom_deltawvec = torch.zeros_like(wvec)
 
@@ -569,7 +569,7 @@ class ClippingΞByzantine(NoGuardΞByzantine):
 
         #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore=self.vec_state_ignore)
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
@@ -619,7 +619,7 @@ class RandomBucketingΞByzantine(ClippingΞByzantine):
 
         #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore=self.vec_state_ignore)
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs);    del wvecs
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
@@ -686,7 +686,7 @@ class SequentialBucketingΞByzantine(ClippingΞByzantine):
 
         #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore=self.vec_state_ignore)
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs);    del wvecs
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
@@ -754,7 +754,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 
     def init_stacked_wvecs(self, model):
         wvec = fedops.get_param_from_state(model.state_dict(),
-                        keys_to_ignore=self.vec_state_ignore)
+                        keys_to_ignore=self.vec_state_ignore).to(self.device)
         self.aggwvec_tminus1 = wvec
 
 
@@ -785,7 +785,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 
         #for l2norms
         wvecs =[fedops.get_param_from_state(l["model_state"],
-                    keys_to_ignore=self.vec_state_ignore)
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
         stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
