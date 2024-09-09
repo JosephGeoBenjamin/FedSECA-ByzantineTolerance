@@ -275,7 +275,7 @@ class CoordinateWiseCentralityΞByzantine(NoGuardΞByzantine):
         self.vec_state_ignore = ["num_batches_tracked"]
 
         # number of byzzantines to ignore
-        self.cwtm_beta = self.defense_cfg.get("cwtm_beta") #B; should hold K-2B > 0
+        self.cwtm_beta = self.defense_cfg.get("cwtm_beta_count_oneside") #B; should hold K-2B > 0
         self.approach  = self.defense_cfg["approach"]
         self.aggregator_func = self.__coordinatewise_aggregation
 
@@ -959,6 +959,8 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         ## mag and sgn vectors -> for ties
         magn_xraw = torch.abs(x_raw)
 
+        ##NOTE: Time complexity of this Top-K sparsification could be improved
+        ##      by followed by technique used in "Deep Gradient Compression" paper
         ql = self.tensor_quantile(magn_xraw, self.tm_gamma, dim=1)
         ql = ql.view(-1, 1)
         x[magn_xraw<ql] = 0.0
