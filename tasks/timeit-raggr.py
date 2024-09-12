@@ -26,7 +26,8 @@ print(f"cuda version: {torch.version.cuda}")
 CFG = rutl.ObjDict(
 set_device = torch.device("cpu"), #DEVICE
 data_centers_count = 8,  #CLIENTS
-timeit_rounds = 100,
+# timeit_rounds = 100,
+timeit_rounds = 1,
 
 featx_arch     = "resnet18",  #MODEL
 featx_pretrain = "NONE" , # "IMAGENET-1K" or None``
@@ -44,7 +45,7 @@ ckpt_freq_Gstep    = 1,
 test_last_E_epochs = 5,  # detailed cross-client cross-data testing
 test_trend_full    = False, # test with pooled test for all epochs
 
-checkpoint_dir= "/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/clTImeComplex/",
+checkpoint_dir= "/l/users/ibrahim.almakky/joseph/wacv25/clTimeComplex/run2/",
 resume_training = False
 )
 
@@ -68,19 +69,21 @@ def empty_create_model(cdevice=CFG.set_device):
                     ).to(cdevice)
 
 ##------------------------------------------------------------------------------
-## Fill memory -- check to stop accidental GPU use
-# size_gb = 21
+### Fill memory -- check to stop accidental GPU use
+# DEVICES=[0]
+# size_gb = 31
 # size_bytes = size_gb * 1024**3
 # num_elements = size_bytes // 4  # float32 takes 4 bytes
-# tensor = torch.ones(num_elements, device="cuda")
+# for x in DEVICES:
+#     tensor = torch.ones(num_elements, device=f"cuda:{x}")
 # print("Allocation Complete...")
 
 ##------------------------------------------------------------------------------
-all_defns_json = json.load(open("/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/Byzantine-available-methods.json",
+all_defns_json = json.load(open("/home/ibrahim.almakky/joseph/wacv25/main-frame/configs/Byzantine-available-methods.json",
                             'rt'))["DEFENSE_METHODS"]
 
 
-for dcc in [4, 8, 16, 32, 64, 128]:
+for dcc in [4, 8, 512, 1024, 2048, 4096]:
     CFG.data_centers_count = dcc
 
     ## ---- Create Empty Weights
