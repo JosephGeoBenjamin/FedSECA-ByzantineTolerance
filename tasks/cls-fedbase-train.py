@@ -709,7 +709,7 @@ def simple_main(model_key=None, folder_suffix=""):
                             ckpt_keys=["start", "last"],
                             test_partitions=CFG.test_partitions)
 
-
+        torch.cuda.empty_cache()
     return CFG.gLogPath
 
 
@@ -849,7 +849,7 @@ if __name__ == '__main__':
         else:
             train_runner()
 
-    ###----------------------------------
+    ###----------------------------------e
 
     # train_runner()
     iided_vs_simple_wrap()

@@ -7,9 +7,9 @@
     "test_partitions"   :1,
     "center_inclusion_filter":[],
 
-    "fed_partition_type": "aleph",
+    "fed_partition_type": "iid",
     "dirichlet_alpha" : false,
-    "iid_ness"        : false,
+    "iid_ness"        : "full",
 
     "update_mode"   :"epoch",
     "global_rounds" : 50,
@@ -54,5 +54,7 @@
     "checkpoint_dir": "dummy_path",
     "resume_training": false,
 
-    "override_csv" : "cifar10_fedrise_train_split.csv"
+    "override_csv" : "cifar10_fedrise_train_split.csv",
+    "hello_override_csv" : "cifar10_train_data-noval.csv"
+
 }

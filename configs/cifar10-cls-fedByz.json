@@ -7,8 +7,8 @@
     "test_partitions"   :1,
     "center_inclusion_filter":[],
 
-    "fed_partition_type": "aleph",
-    "dirichlet_alpha" : false,
+    "fed_partition_type": "iid",
+    "dirichlet_alpha" : 100,
     "iid_ness"        : false,
 
     "update_mode"   :"epoch",
@@ -28,10 +28,17 @@
     "proxreg_mu"    : 0.0,
 
     "defense_cfg":{
+        "defense_method" : "KrumΞByzantine",
+        "multikrum_m"    : 1,
+        "num_assumed_byz": 2
     },
 
     "byztn_cfg":{
+        "byztn_clients": [3,4],
+        "byztn_method" : "FangCraftedζAttack",
+        "lambda":0.1
     },
+
 
     "reg_method"   : "NONE",
     "reg_coeff"    : 0.0,
@@ -51,7 +58,7 @@
     "test_last_E_epochs": 0,
     "test_trend_full"   : true,
 
-    "checkpoint_dir": "dummy_path",
+    "checkpoint_dir": "hypotheses/-debug/E06-Krum01/",
     "resume_training": false,
 
     "override_csv" : "cifar10_fedrise_train_split.csv"
