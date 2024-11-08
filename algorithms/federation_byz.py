@@ -1187,9 +1187,10 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
 
     ## ----------------------- Reputation --------------------------------------
-
     def _torch_Cordancy(self, a, b):
         """
+        a,b : K,D shape
+
         Kendall Formulation
         tau_a = (P - Q) / (N(N-1)/2)
         tau_b = (P - Q) / sqrt((P + Q + T) * (P + Q + U))
@@ -1200,18 +1201,32 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
         sgn_pair = a_sgn * b_sgn
 
-        taua = sgn_pair.sum(dim=1) # unnormalised
+        def sgn_dot():
+            taua = sgn_pair.sum(dim=1) # unnormalised
+            return torch.sign(taua)
 
-        # n_conc = (sgn_pair>0).sum(dim=1)
-        # n_disc = (sgn_pair<0).sum(dim=1)
-        # n = torch.prod(torch.tensor(b_sgn[0].shape)) #number of params
-        # taua = (n_conc - n_disc) / (n_conc+n_disc)
+        n_conc = (sgn_pair>0).sum(dim=1)
+        n_disc = (sgn_pair<0).sum(dim=1)
+
+        def concordancy_like():
+            """Similar to Kendall's"""
+            n = torch.prod(torch.tensor(b_sgn[0].shape)) #number of params
+            taua = (n_conc - n_disc) / (n_conc+n_disc) # results are exact as cosim(signs)
+            # taua = (n_conc - n_disc) / torch.prod(torch.tensor(a_sgn.shape))
+            # taua = (n_conc - n_disc) / (n*(n-1)/2)
+
+            return taua
+
+        def binarised_xored():
+            a_bin = (a_sgn > 0)
+            b_bin = (b_sgn > 0)
+
+            xored = torch.logical_xor(a_bin, b_bin).sum(dim=1)
+            taua = 1 -  (xored / len(a_bin) )
+            return taua
 
 
-        ## taua = (n_conc - n_disc) / torch.prod(torch.tensor(a_sgn.shape))
-        ## taua = (n_conc - n_disc) / (n*(n-1)/2)
-
-        return taua
+        return sgn_dot()
 
 
     def _grad_rating_score(self, sign_x):
