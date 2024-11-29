@@ -1,25 +1,20 @@
 # FedRISE
-Offical Implementation of Paper "**FedRISE: Rating Induced Sign Election of Gradients for Byzantine Tolerant Federated Aggregation**"
+Offical Implementation of Paper "**FedSECA: Sign Election and Coordinate-wise Aggregation of Gradients
+for Byzantine Tolerant Federated Learning**"
 
 **Authors:** Joseph Geo Benjamin, Mothilal Asokan, Mohammad Yaqub, Karthik Nandakumar.
 
 ## Abstract
 
-> One of the most common defense strategies against model poisoning in federated learning is to employ a robust aggregator mechanism that makes the training more resilient.
-Many of the existing Byzantine robust aggregators provide theoretical guarantees and are empirically effective against certain categories of attacks.
-However, we observe that certain high-strength attacks can subvert the aggregator and collapse the training.
-In addition, most aggregators require identifying tolerant settings to converge with considerable data heterogeneity, making aggregation extremely vulnerable.
-Impact of attacks becomes more pronounced when the number of Byzantines is **near-majority**, and becomes harder to evade if the attacker is **omniscient** with access to data, honest updates and aggregation methods.
-Motivated by these observations, we develop a robust aggregator called FedRISE for cross-silo FL that is consistent and less susceptible to poisoning updates by an omniscient attacker. The proposed method explicitly determines the optimal direction of each gradient through a sign-voting strategy that uses variance-reduced sparse gradients.
-We argue that vote weighting based on the cosine similarity of raw gradients is misleading, and we introduce a sign-based gradient valuation function that ignores the gradient magnitude.
-We compare our method against 8 robust aggregators under 6 poisoning attacks on 3 datasets and architectures. Our results show that existing robust aggregators collapse for at least some attacks under severe settings, while FedRISE demonstrates better robustness because of a stringent gradient inclusion formulation.
+> One of the most common defense strategies against Byzantine clients in federated learning (FL) is to employ a robust aggregator mechanism that makes the training more resilient. While many existing Byzantine robust aggregators provide theoretical convergence guarantees and are empirically effective against certain categories of attacks, we observe that certain high-strength attacks can subvert the robust aggregator and collapse the training. To overcome this limitation, we propose a method called FedSECA for robust `S`ign `E`lection and `C`oordinate-wise `A`ggregation of gradients in FL that is less susceptible to malicious updates by an omniscient attacker. The proposed method has two main components. The **Concordance Ratio Induced Sign Election** (CRISE) module determines the consensus direction (elected sign) for each individual parameter gradient through a weighted voting strategy. The client weights are assigned based on a novel metric called concordance ratio, which quantifies the degree of sign agreement between the client gradient updates. Based on the elected sign, a **Robust Coordinate-wise Aggregation** (RoCA) strategy is employed, where variance-reduced sparse gradients are aggregated only if they are in alignment with the corresponding elected sign. We compare our proposed FedSECA method against 8 robust aggregators under 6 Byzantine attacks on 3 datasets and architectures. The results show that existing robust aggregators fail for at least some attacks, while FedSECA exhibits better robustness.
 
+![FedSECA-Method](https://github.com/JosephGeoBenjamin/FedSECA-ByzantineTolerance/releases/download/cvpr25-v1/xFedSECA_method.png)
 
 ## Code base
 
 With all possible abuse of SW-dev practices, the code is intentionally kept simple to ensure easier understanding, maintainability, and reduce the likelihood unintended behavior.
 
-Current code base is intended for evaluating Cross-Silo use case. Same Global model is broadcasted to all clients after agregation is used for evaluation, not intended fairness based differnt models for each clients.
+Current code base is intended for evaluating Cross-Silo use case. Same Global model is broadcasted to all clients after agregation is used for evaluation, not intended for personalization/fairness approaches that sends different models for each clients.
 
 1. Follow installation steps in `setup.bash` for dependency.
 
@@ -38,11 +33,11 @@ Current code base is intended for evaluating Cross-Silo use case. Same Global mo
 6. The `datacode` folder has all dataset class implementations. Please download and process the datasets from appropriate sources.
 
 #### Downloads:
-Dataset splits used for training, NoteBooks for plotting and all config files are available in the Downloads of [WACV25 releases](https://github.com/JosephGeoBenjamin/FedRISE-ByzantineTolerance/releases/tag/wacv25-v1)
+Dataset splits used for training, NoteBooks for plotting and all config files are available in the Downloads of [CVPR2025 releases](https://github.com/JosephGeoBenjamin/FedRISE-ByzantineTolerance/releases/tag/cvpr25-v1)
 
 #### Possible Code Improvements:
 (for future self or others)
-1. Add multi-threading support to training multiple models in parallel
+1. Add multi-threading support to training multiple models in parallel, currently traiing happens sequentially
 2. Add support for loading and unloading models to disk for each round, to support experiments in cross-device setting with thousands of models without needing to fit all in GPU(s) similtaneously.
 
 
@@ -57,3 +52,18 @@ If you find our work on Byzantine Tolerance insightful for your research, consid
 ```
 
 ```
+
+
+This work builds upon and enhances the FedRISE method developed during my Master’s thesis.
+
+```
+@article{benjamin2024byzantine,
+  title={Byzantine Tolerant Gradient Aggregation for Cross-Silo Federated Learning},
+  author={Benjamin, Joseph},
+  year={2024}
+}
+```
+
+More descriptive methods representation
+
+![FedRISE_V2-method](https://github.com/JosephGeoBenjamin/FedSECA-ByzantineTolerance/releases/download/cvpr25-v1/xFedRISEV2-methods.png)

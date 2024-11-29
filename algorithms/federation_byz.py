@@ -822,7 +822,13 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 ##==============================================================================
 
 ##******************************************************************************
-class FedRiseV2ΞByzantine(NoGuardΞByzantine):
+
+#FedSECA
+class FedSECAΞByzantine(NoGuardΞByzantine):
+    """ This is FedSECA implementation which includes CRISE and ROCA steps
+    Previously aliased FedRiseV2, anywhere it says this it points to FedSECA
+    This is an improvement on FedRISE developed as part of thesis work.
+    """
 
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
@@ -847,7 +853,7 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
         if self.id == "G": #large tensors, so why waste mem
             self.init_stacked_wvecs(model)
 
-        print(f"Defense: FedRISE beta-{self.mom_beta} gamma-{self.tm_gamma}")
+        print(f"Defense: FedSECA beta-{self.mom_beta} gamma-{self.tm_gamma}")
 
         if len(self.byztn_cfg) != 0:
             self._init_byzantiness()
@@ -1011,5 +1017,8 @@ class FedRiseV2ΞByzantine(NoGuardΞByzantine):
 
 
         return agg_state, info_dict
+
+## Aliasing
+FedRiseV2ΞByzantine = FedSECAΞByzantine
 
 ##==============================================================================
