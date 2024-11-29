@@ -63,7 +63,3 @@ This work builds upon and enhances the FedRISE method developed during my Master
   year={2024}
 }
 ```
-
-More descriptive methods representation
-
-![FedRISE_V2-method](https://github.com/JosephGeoBenjamin/FedSECA-ByzantineTolerance/releases/download/cvpr25-v1/xFedRISEV2-methods.png)
