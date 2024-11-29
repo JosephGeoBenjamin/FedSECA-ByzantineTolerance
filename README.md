@@ -1,4 +1,4 @@
-# FedRISE
+# FedSECA
 Offical Implementation of Paper "**FedSECA: Sign Election and Coordinate-wise Aggregation of Gradients
 for Byzantine Tolerant Federated Learning**"
 
