@@ -120,8 +120,7 @@ def load_EfficientnetBackbone(arch, torch_pretrain= None, freeze= False):
 
     ## Model loading
     if arch == 'efficientnet_b0': #5.3M param
-        backbone = torchvision.models.efficientnet_b0(zero_init_residual=True,
-                                weights=torch_pretrain)
+        backbone = torchvision.models.efficientnet_b0(weights=torch_pretrain)
         outfeat_size = 1280
     else:
         raise ValueError(f"Unsupported Model Implementation {arch} called in {os.path.basename(__file__)}")

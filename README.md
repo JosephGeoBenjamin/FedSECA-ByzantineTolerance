@@ -43,7 +43,7 @@ Dataset splits used for training, NoteBooks for plotting and all config files ar
 #### Possible Code Improvements:
 (for future self or others)
 1. Add multi-threading support to training multiple models in parallel
-2. Add support for loading and unloading models to disk for each round, to support experiments in cross-device seting with thousands of models without needing to fit all in GPU(s) similtaneously.
+2. Add support for loading and unloading models to disk for each round, to support experiments in cross-device setting with thousands of models without needing to fit all in GPU(s) similtaneously.
 
 
 ## Cite Us

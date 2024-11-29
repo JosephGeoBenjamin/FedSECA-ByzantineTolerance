@@ -452,7 +452,7 @@ if __name__ == '__main__':
 
             for c in center_list:
                 if data_partition_type=="aleph":
-                    for q in [1000, 0, 100, 1, 10]:
+                    for q in ["y"]:
                         CFG.iid_ness = None
                         CFG.dirichlet_alpha = q
                         qtitle = f"/{q}_aleph/"
