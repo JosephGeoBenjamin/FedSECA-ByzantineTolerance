@@ -452,6 +452,7 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
                     for l in lsets]
         stacked_wvec = torch.vstack(wvecs)
 
+        # sample based weighting (α) is taken as constant 1/K, giving same weight for each clients
         alphas = torch.tensor([1 / len(lsets) for _ in lsets]).view(-1,1).to(self.device)
         betas_list = []
 
@@ -475,6 +476,8 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
 
         info_dict = {"client_weightage":betas_list}
         return agg_state, info_dict
+
+
 
 ##==============================================================================
 
@@ -716,6 +719,89 @@ class SequentialBucketingΞByzantine(ClippingΞByzantine):
         return agg_state, info_dict
 
 
+class FedNGAΞByzantine(NoGuardΞByzantine):
+    """ Normalized Gradient Aggregation
+    Reference: Zuo, Shiyuan, et al. "Byzantine-resilient Federated Learning Employing Normalized Gradients on Non-IID Datasets."
+    paper: https://arxiv.org/abs/2408.09539v1
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = K = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+
+        self.aggregator_func = self.__normalized_grad_aggregate
+
+        ##
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+
+        print("Defense: Fed-NormGradAgg")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+
+    def init_stacked_wvecs(self, model):
+        wvec = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore).to(self.device)
+        self.aggwvec_tminus1 = wvec
+        self.mom_deltawvec = torch.zeros_like(wvec)
+
+
+    #-------- Server methods ----------
+    def safe_divide(self, nu, de, fill=1.0):
+        res = torch.full_like(de, fill_value=fill)
+        mask = (de != 0.0)
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
+        return res
+
+
+
+    def __normalized_grad_aggregate(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec
+
+
+        ## Normalise
+        stacked_norms = torch.norm(stacked_deltawvec, dim=1).view(-1, 1)
+        new_deltawvec = (stacked_deltawvec / stacked_norms).mean(dim=0)
+
+        new_wvec = self.aggwvec_tminus1 - new_deltawvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.aggwvec_tminus1 = new_wvec.clone()
+
+        info_dict = {"client_norm_values": stacked_norms.cpu().tolist()}
+
+        return agg_state, info_dict
+
+
+
 ##==============================================================================
 
 class TiesMergeΞByzantine(NoGuardΞByzantine):
@@ -827,7 +913,7 @@ class TiesMergeΞByzantine(NoGuardΞByzantine):
 class FedSECAΞByzantine(NoGuardΞByzantine):
     """ This is FedSECA implementation which includes CRISE and ROCA steps
     Previously aliased FedRiseV2, anywhere it says this it points to FedSECA
-    This is an improvement on FedRISE developed as part of thesis work.
+    This is an improvement on thesis work titled FedRISE.
     """
 
     def __init__(self, cfg, id, model, device="cpu"):

@@ -2,7 +2,7 @@
     "dataset"       : "CIFAR",
     "dataset_type"  : "cifar10",
     "label_type"    : "label",
-    "data_root_path": "/home/joseph.benjamin/WERK/fed-cvpr/data/cifar10-jfed/",
+    "data_root_path": "/home/joseph.benjamin/WERK/data/jfed-data/cifar10-jfed/",
     "data_centers_count": 5,
     "test_partitions"   :1,
     "center_inclusion_filter":[],

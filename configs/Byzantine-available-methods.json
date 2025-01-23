@@ -99,6 +99,10 @@
     },
 
     {
+        "defense_method" : "FedNGAΞByzantine"
+    },
+
+    {
         "defense_method" : "TiesMergeΞByzantine",
         "tm_beta": 0.9
     },
