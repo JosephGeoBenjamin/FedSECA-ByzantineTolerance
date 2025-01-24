@@ -478,6 +478,80 @@ class GeoMedianRFAΞByzantine(NoGuardΞByzantine):
         return agg_state, info_dict
 
 
+class HuberLossWeiszfeldΞByzantine(NoGuardΞByzantine):
+    """ Minimization of Huberloss following Weiszfeild algorithm
+    reference: Zhao, Puning, Fei Yu, and Zhiguo Wan. "A huber loss minimization approach to byzantine robust federated learning." AAAI-2024.
+    paper: https://ojs.aaai.org/index.php/AAAI/article/view/30181
+    """
+
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.aggregator_func = self.__huberloss_aggregation
+        self.nu  = torch.tensor(self.defense_cfg["stability_nu"]) # 1e-6
+        self.tolerance_tau  = float(self.defense_cfg["tolerance_iter_tau"]) #
+        self.max_iters_R    = int(self.defense_cfg["max_iter_r"]) # for safety
+        # TODO: make the huberloss_thresh dynamically computed based on dataset class
+        self.threshold_T = float(self.defense_cfg["huberloss_thresh_t"]) # 2/sqrt(n_k) in paper, n_k is number of samples in i-th client
+
+        print("Defense: Huber Loss with Weizsfield")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+
+    #-------- Server methods ----------
+
+    def __huberloss_aggregation(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        # fully_wvecs = [fedops.get_param_from_state(l["model_state"]).to(self.device)
+        #             for l in lsets]
+        # sfully_wvec = torch.vstack(fully_wvecs)
+
+        wvecs = [fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore = self.vec_state_ignore).to(self.device)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+
+        betas_list = []
+
+        ### Weiszfeld like huberloss minimization
+        c = torch.zeros_like(wvecs[0])
+        c_prv = c.clone()
+        for r in range(self.max_iters_R):
+            l2dist = torch.norm(c - stacked_wvec, dim=1).view(-1,1)
+            betas_raw = self.threshold_T / torch.maximum(l2dist, self.nu.to(self.device))
+            betas = torch.minimum(torch.tensor(1.0).to(self.device), betas_raw)
+
+            c = betas * stacked_wvec # b1*[w1] \ b2*[w2] \ b3*[w3] ...
+            c = c.sum(dim=0) / betas.sum(dim=0)
+
+            betas_list.append(betas.flatten().tolist())
+
+            if torch.norm(c - c_prv).item() < self.tolerance_tau: break
+            else: c_prv = c.clone()
+
+        ###
+        final_wvec = c.clone()
+
+        agg_state = fedops.set_param_in_state(state_dict_struct, final_wvec,
+                                              keys_to_ignore=self.vec_state_ignore)
+
+        info_dict = {"client_weightage":betas_list}
+        return agg_state, info_dict
+
+
+
 
 ##==============================================================================
 
@@ -799,6 +873,9 @@ class FedNGAΞByzantine(NoGuardΞByzantine):
         info_dict = {"client_norm_values": stacked_norms.cpu().tolist()}
 
         return agg_state, info_dict
+
+##==============================================================================
+
 
 
 

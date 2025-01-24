@@ -1,0 +1,11 @@
+{
+    "defense_cfg":{
+        "defense_method" : "HuberLossWeiszfeldΞByzantine",
+        "stability_nu"      : 1e-6,
+        "max_iter_r"        : 100,
+        "tolerance_iter_tau": 0.001,
+        "huberloss_thresh_t": 0.02
+
+    }
+
+}
