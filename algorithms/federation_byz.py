@@ -9,6 +9,8 @@ import numpy as np
 import random
 import scipy
 import pyod
+from sklearn.cluster import KMeans as skl_KMeans
+
 import algorithms.federation_ops as fedops
 import algorithms.byzantine_attacks as byz_attacks
 import utilities.runUtils as rutl
@@ -876,7 +878,207 @@ class FedNGAΞByzantine(NoGuardΞByzantine):
 
 ##==============================================================================
 
+class FLDetectorΞByzantine(NoGuardΞByzantine):
+    """
+    reference: Zhang, Zaixi, et al. "Fldetector: Defending federated learning against model poisoning attacks via detecting malicious clients." SIGKDD 2022.
+    """
 
+    def __init__(self, cfg, id, model, device="cpu"):
+        self.id = id
+        self.device = device
+        self.byz_way = None
+        self.cfg = cfg
+        self.byztn_cfg = cfg.byztn_cfg
+        self.defense_cfg = cfg.defense_cfg
+        self.num_client_k = K = int(cfg.data_centers_count) # K
+
+        self.gmodel_init = copy.deepcopy(model).to(self.device) # model recieved at start
+        self.gmodel_tminus1  = copy.deepcopy(model).to(self.device) # model recieved at Tth global comm
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        self.window_n = int(self.defense_cfg.get("history_window")) # N in paper
+        self.aggr_method = self.defense_cfg.get("aggregator_method")
+        assert self.aggr_method == "fedavg", f"Expected 'fedavg' but got '{self.aggr_method}'"
+
+        self.aggregator_func = self.__byzants_detector
+
+        ##
+        self.vec_state_ignore = ["num_batches_tracked"] # critical for l2norms since this skews it
+        if self.id == "G": #large tensors, so why waste mem
+            self.init_stacked_wvecs(model)
+
+        print(f"Defense: FL Detector w/ {self.aggr_method}")
+
+        if len(self.byztn_cfg) != 0:
+            self._init_byzantiness()
+
+    ##--------------------
+
+    def init_stacked_wvecs(self, model):
+        wvec = fedops.get_param_from_state(model.state_dict(),
+                        keys_to_ignore=self.vec_state_ignore).to(self.device)
+        self.aggwvec_tminus1 = wvec
+        self.aggdeltavec_tminus1 = torch.zeros_like(wvec)
+
+        self.model_diffs = [] # ΔW of global
+        self.update_diffs = [] # ΔG of global
+        self.edist_priors = []
+
+    #-------- Server methods ----------
+    def safe_divide(self, nu, de, fill=1.0):
+        res = torch.full_like(nu, fill_value=fill)
+        mask = (de != 0.0)
+
+        if (nu.shape == mask.shape): nu_ = nu[mask]
+        elif (sum(nu.shape) == 1):   nu_ = nu
+        else: raise Exception(f"Incompatible shapes {de.shape}, {nu.shape}")
+
+        res[mask] = torch.div(nu_, de[mask])
+        return res
+
+
+    def _hessian_vector_product(self, dW_t_list, dG_t_list, stacked_dV):
+        """ Using L-BFGS
+        list of 1xD vectors, len is equal to window size (WN)
+        """
+        stacked_dV = stacked_dV.T # D x Klients
+        dW_t = torch.vstack(dW_t_list).T #  D x WN
+        dG_t = torch.vstack(dG_t_list).T #  D x WN
+
+        dW_t_time_dG_t = torch.matmul(dW_t.T, dG_t)
+        dW_t_time_dW_t = torch.matmul(dW_t.T, dW_t)
+
+        # Extract upper triangular part of dW_k_time_dG_k -> [WN, WN]
+        R_t = torch.triu(dW_t_time_dG_t)
+        L_t = dW_t_time_dG_t - R_t.to(self.device)  # [WN, WN]
+
+        sigma_k = torch.dot(dG_t_list[-1], dW_t_list[-1]) / torch.dot(dW_t_list[-1], dW_t_list[-1])  # []
+        D_t_diag = torch.diag(dW_t_time_dG_t)  # [WN]
+
+        upper_mat = torch.cat([sigma_k * dW_t_time_dW_t, L_t], dim=1)  # [WN, 2WN]
+        lower_mat = torch.cat([L_t.t(), -torch.diag(D_t_diag)], dim=1)  # [WN, 2WN]
+
+        mat = torch.cat([upper_mat, lower_mat], dim=0)  # [2WN, 2WN]
+        mat_inv = torch.linalg.inv(mat)  # [2WN, 2WN]
+
+        approx_prod = sigma_k * stacked_dV # [D x K]
+
+        p_mat = torch.cat([torch.matmul(dW_t.T, sigma_k * stacked_dV), torch.matmul(dG_t.T, stacked_dV)], dim=0)  # [2WN x K]
+        approx_prod -= torch.matmul(torch.matmul(torch.cat([sigma_k * dW_t, dG_t], dim=1), mat_inv), p_mat)  # [D x K]
+
+        return approx_prod.T
+
+
+    def _compute_suspicion_score(self, g_estim, g_actual):
+        edist_t = (g_estim - g_actual).norm(dim=1).view(-1,1) # K x 1
+        self.edist_priors.append(edist_t)
+
+        sscores_t = torch.stack(self.edist_priors, dim=1).mean(dim=1) #K x 1
+
+        if len(self.edist_priors) >= self.window_n: #NOTE: just lazy coding
+            del self.edist_priors[0]
+
+        return sscores_t
+
+
+    def _detect_malicious_clients(self, score):
+        ## GAP analysis
+        nrefs = 10
+        ks = range(1, np.min([self.num_client_k, 25]))
+        gaps = np.zeros(len(ks))
+        gapDiff = np.zeros(len(ks) - 1)
+        sdk = np.zeros(len(ks))
+        min = np.min(score)
+        max = np.max(score)
+        score = (score - min)/(max-min)
+        for i, k in enumerate(ks):
+            estimator = skl_KMeans(n_clusters=k)
+            estimator.fit(score.reshape(-1, 1))
+            label_pred = estimator.labels_
+            center = estimator.cluster_centers_
+            Wk = np.sum([np.square(score[m]-center[label_pred[m]]) for m in range(len(score))])
+            WkRef = np.zeros(nrefs)
+            for j in range(nrefs):
+                rand = np.random.uniform(0, 1, len(score))
+                estimator = skl_KMeans(n_clusters=k)
+                estimator.fit(rand.reshape(-1, 1))
+                label_pred = estimator.labels_
+                center = estimator.cluster_centers_
+                WkRef[j] = np.sum([np.square(rand[m]-center[label_pred[m]]) for m in range(len(rand))])
+            gaps[i] = np.log(np.mean(WkRef)) - np.log(Wk)
+            sdk[i] = np.sqrt((1.0 + nrefs) / nrefs) * np.std(np.log(WkRef))
+            if i > 0:
+                gapDiff[i - 1] = gaps[i - 1] - gaps[i] + sdk[i]
+
+        for i in range(len(gapDiff)):
+            if gapDiff[i] >= 0:
+                select_k = i+1
+                break
+
+        ## Find if Malicious Clients exists
+        atk_clients = []
+        if select_k == 1:
+            print('FLDetect: No attack detected!')
+        else:
+            estimator = skl_KMeans(n_clusters=2)
+            estimator.fit(score.reshape(-1, 1))
+            label_pred = estimator.labels_
+            # 0 is taken as label of malicious clients
+            if np.mean(score[label_pred==0])<np.mean(score[label_pred==1]):
+                label_pred = 1 - label_pred # change 0 assignment based on score sum
+            atk_clients = np.where(label_pred==0)
+            print(f'FLDetect: Attackers are {atk_clients}')
+
+        return atk_clients
+
+
+    def __byzants_detector(self, lsets):
+        state_dict_struct = copy.deepcopy(lsets[0]["model_state"])
+        K = len(lsets)
+
+        #for l2norms
+        wvecs =[fedops.get_param_from_state(l["model_state"],
+                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+                    for l in lsets]
+        stacked_wvec = torch.vstack(wvecs)
+        stacked_deltawvec = self.aggwvec_tminus1 - stacked_wvec # stacked_dV
+
+        ###------- check if epoch is more than 0
+        nonmalicious_size = self.num_client_k
+
+        if len(self.model_diffs) > 0:
+            sdeltawvec_cap = self._hessian_vector_product(self.model_diffs,
+                                                        self.update_diffs,
+                                                        stacked_deltawvec)
+
+            susp_scores = self._compute_suspicion_score(stacked_deltawvec, sdeltawvec_cap)
+
+            mal_clients = self._detect_malicious_clients(susp_scores.cpu().numpy())
+            nonmalicious_size = self.num_client_k - len(mal_clients)
+
+            mal_idx = torch.tensor(mal_clients).to(self.device,dtype=torch.long).view(-1)
+            stacked_deltawvec[mal_idx, :] = 0
+
+
+        ## FedAVG on selected clients
+        mean_dwvec = stacked_deltawvec.sum(dim=0) / nonmalicious_size
+
+        new_wvec = self.aggwvec_tminus1 - mean_dwvec
+        agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
+                                               keys_to_ignore=self.vec_state_ignore)
+
+        self.model_diffs.append(mean_dwvec.clone())
+        self.update_diffs.append(self.aggdeltavec_tminus1 - mean_dwvec)
+
+        self.aggdeltavec_tminus1 = mean_dwvec.clone()
+        self.aggwvec_tminus1 = new_wvec.clone()
+
+        if len(self.model_diffs) > self.window_n: del self.model_diffs[0]
+        if len(self.update_diffs) > self.window_n: del self.update_diffs[0]
+
+        info_dict = {"client_clip_weightage": "Nope Can't do for coordwise operation"}
+
+        return agg_state, info_dict
 
 
 ##==============================================================================

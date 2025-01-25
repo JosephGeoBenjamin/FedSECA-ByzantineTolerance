@@ -1,0 +1,8 @@
+{
+    "defense_cfg":{
+        "defense_method" : "FLDetectorΞByzantine",
+        "history_window" : 10,
+        "aggregator_method" : "fedavg"
+    }
+
+}

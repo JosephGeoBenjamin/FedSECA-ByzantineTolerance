@@ -1,6 +1,6 @@
 {
     "dataset"       : "EUROSAT",
-    "data_root_path": "/home/joseph.benjamin/WERK/fed-cvpr/data/eurosat2018-jfed/",
+    "data_root_path": "/home/joseph.benjamin/WERK/data/jfed-data/eurosat2018-jfed/",
     "data_centers_count": 7,
     "test_partitions"   : 1,
     "center_inclusion_filter":[],

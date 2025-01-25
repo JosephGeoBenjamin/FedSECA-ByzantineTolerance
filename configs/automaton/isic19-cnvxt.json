@@ -1,6 +1,6 @@
 {
     "dataset"       : "ISIC",
-    "data_root_path": "/home/joseph.benjamin/WERK/fed-cvpr/data/isic2019-jfed/",
+    "data_root_path": "/home/joseph.benjamin/WERK/data/jfed-data/isic2019-jfed/",
     "data_centers_count": 6,
     "test_partitions"   :1,
     "center_inclusion_filter":[],
