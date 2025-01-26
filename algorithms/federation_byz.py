@@ -70,7 +70,6 @@ def torch_insert_diagonal(x, D = 0.0): #expand along dim=1
 ## **************************************
 
 class NoGuardΞByzantine():
-
     def __init__(self, cfg, id, model, device="cpu"):
         self.id = id
         self.device = device
@@ -91,10 +90,13 @@ class NoGuardΞByzantine():
 
 
     def _init_byzantiness(self):
+        """NOTE: Attack class instantiation uses Dependency Injection / Callback pattern
+        this is to enable dynamic attack optimization with knowledge of defence mechanism
+        """
         byz_clients = [int(b) for b in self.byztn_cfg["byztn_clients"]]
         if self.id in byz_clients:
             self.byz_way = get_attack_clsobj(self.byztn_cfg["byztn_method"])(
-                self.cfg, self.gmodel_init, self.device)
+                self.cfg, self.gmodel_init, defense_clsobj = self, device=self.device)
 
 
     #-------- Client methods ----------
@@ -982,41 +984,54 @@ class FLDetectorΞByzantine(NoGuardΞByzantine):
 
 
     def _detect_malicious_clients(self, score):
+
+        atk_clients = []
+
         ## GAP analysis
         nrefs = 10
         ks = range(1, np.min([self.num_client_k, 25]))
         gaps = np.zeros(len(ks))
         gapDiff = np.zeros(len(ks) - 1)
         sdk = np.zeros(len(ks))
+
+        score[np.isnan(score)] = 0
         min = np.min(score)
         max = np.max(score)
-        score = (score - min)/(max-min)
-        for i, k in enumerate(ks):
-            estimator = skl_KMeans(n_clusters=k)
-            estimator.fit(score.reshape(-1, 1))
-            label_pred = estimator.labels_
-            center = estimator.cluster_centers_
-            Wk = np.sum([np.square(score[m]-center[label_pred[m]]) for m in range(len(score))])
-            WkRef = np.zeros(nrefs)
-            for j in range(nrefs):
-                rand = np.random.uniform(0, 1, len(score))
+
+        # guard when scores are same for all, return empty
+        if np.isclose(max-min, 0.0): return atk_clients
+
+        try: # TODO: sometimes scores hit nan even after handling above, debug that
+            score = (score - min)/(max-min)
+            for i, k in enumerate(ks):
                 estimator = skl_KMeans(n_clusters=k)
-                estimator.fit(rand.reshape(-1, 1))
+                estimator.fit(score.reshape(-1, 1))
                 label_pred = estimator.labels_
                 center = estimator.cluster_centers_
-                WkRef[j] = np.sum([np.square(rand[m]-center[label_pred[m]]) for m in range(len(rand))])
-            gaps[i] = np.log(np.mean(WkRef)) - np.log(Wk)
-            sdk[i] = np.sqrt((1.0 + nrefs) / nrefs) * np.std(np.log(WkRef))
-            if i > 0:
-                gapDiff[i - 1] = gaps[i - 1] - gaps[i] + sdk[i]
+                Wk = np.sum([np.square(score[m]-center[label_pred[m]]) for m in range(len(score))])
+                WkRef = np.zeros(nrefs)
+                for j in range(nrefs):
+                    rand = np.random.uniform(0, 1, len(score))
+                    estimator = skl_KMeans(n_clusters=k)
+                    estimator.fit(rand.reshape(-1, 1))
+                    label_pred = estimator.labels_
+                    center = estimator.cluster_centers_
+                    WkRef[j] = np.sum([np.square(rand[m]-center[label_pred[m]]) for m in range(len(rand))])
+                gaps[i] = np.log(np.mean(WkRef)) - np.log(Wk)
+                sdk[i] = np.sqrt((1.0 + nrefs) / nrefs) * np.std(np.log(WkRef))
+                if i > 0:
+                    gapDiff[i - 1] = gaps[i - 1] - gaps[i] + sdk[i]
+        except:
+            print("Unstable KMeans Clutering, returning empty")
+            return atk_clients
 
+        select_k = 1
         for i in range(len(gapDiff)):
             if gapDiff[i] >= 0:
                 select_k = i+1
                 break
 
         ## Find if Malicious Clients exists
-        atk_clients = []
         if select_k == 1:
             print('FLDetect: No attack detected!')
         else:
@@ -1045,7 +1060,7 @@ class FLDetectorΞByzantine(NoGuardΞByzantine):
 
         ###------- check if epoch is more than 0
         nonmalicious_size = self.num_client_k
-
+        mal_clients = []
         if len(self.model_diffs) > 0:
             sdeltawvec_cap = self._hessian_vector_product(self.model_diffs,
                                                         self.update_diffs,
@@ -1076,7 +1091,7 @@ class FLDetectorΞByzantine(NoGuardΞByzantine):
         if len(self.model_diffs) > self.window_n: del self.model_diffs[0]
         if len(self.update_diffs) > self.window_n: del self.update_diffs[0]
 
-        info_dict = {"client_clip_weightage": "Nope Can't do for coordwise operation"}
+        info_dict = {"malicious_client": mal_clients}
 
         return agg_state, info_dict
 
