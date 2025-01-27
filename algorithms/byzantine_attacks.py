@@ -21,7 +21,7 @@ Tth: Ginit->L0->G0->L1->G1...->LT->GT->L
 
 
 class LabelFlipζAttack():
-    def __init__(self, cfg, model_at_start, device="cpu" ):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
         # self.model_init = copy.deepcopy(model)
         print("This is a dummy init; LabelFlipζAttack for Training Phase attack")
 
@@ -30,7 +30,7 @@ class LabelFlipζAttack():
 
 
 class RandomizedζAttack():
-    def __init__(self, cfg, model_at_start, device="cpu" ):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
         # self.model_init = copy.deepcopy(model)
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
@@ -46,7 +46,7 @@ class RandomizedζAttack():
 
 
 class AffineζAttack():
-    def __init__(self, cfg, model_at_start,  device="cpu"):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.scaler = cfg.byztn_cfg["scale"]
@@ -67,7 +67,7 @@ class FangCraftedζAttack():
     code reference: https://github.com/Naiftt/SPAFD/
     """
 
-    def __init__(self, cfg, model_at_start, device="cpu"):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.lmbd = cfg.byztn_cfg["lambda"] # 0.1 in paper
@@ -105,7 +105,7 @@ class ALIEζAttack():
     code modified: https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/attacks
     """
 
-    def __init__(self, cfg, model_at_start, device="cpu"):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
 
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
@@ -161,7 +161,7 @@ class XieIPMζAttack():
     Paper: Fall of Empires: Breaking Byzantine-tolerant SGD by Inner Product Manipulation
     code modified: https://github.com/epfml/byzantine-robust-optimizer/tree/main/codes/attacks
     """
-    def __init__(self, cfg, model_at_start, device="cpu"):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
 
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
@@ -209,7 +209,7 @@ class MimicζAttack():
     Paper: Byzantine-Robust Learning on Heterogeneous Datasets via Bucketing
     code modified: https://github.com/epfml/byzantine-robust-noniid-optimizer/tree/main/codes/attacks
     """
-    def __init__(self, cfg, model_at_start, device="cpu"):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
 
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
@@ -296,7 +296,7 @@ class OzfaturaROPζAttack():
     modified on basecode from authors
     """
 
-    def __init__(self, cfg, model_at_start, device="cpu"):
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
         self.device = device
         self.byz_cfg = cfg.byztn_cfg
         self.z_max = self.byz_cfg.get("z_max")
@@ -380,4 +380,116 @@ class OzfaturaROPζAttack():
         del self.gwvec_tminus2
         self.gwvec_tminus2 = gwvec_tminus1.clone()
 
+        return out_state
+
+
+
+class MinMaxSumζAttack():
+    """ an dynamic attack
+    Paper: Shejwalkar, Virat, and Amir Houmansadr. "Manipulating the byzantine: Optimizing model poisoning attacks and defenses for federated learning." NDSS. 2021.
+    reference: https://github.com/vrt1shjwlkr/NDSS21-Model-Poisoning/
+
+    Current implementation is for agr-updates i.e knowledge of both benign updates and server aggregation logic
+    This class does not work on transfering compressed gradients i.e synopis stage is skipped
+
+    """
+    def __init__(self, cfg, model_at_start, defense_clsobj=None, device="cpu"):
+
+        self.device = device
+        self.byz_cfg = cfg.byztn_cfg
+        self.num_client_k = n = cfg["data_centers_count"]
+        self.num_byzant_b = m = len(self.byz_cfg["byztn_clients"])
+        self.num_honest_g = g = n-m
+
+        self.attk_vec_type = self.byz_cfg.get("attack_vector_type") # unit_vec, sign, std
+        self.gamma_scale = self.byz_cfg.get("gamma_start") #10
+        self.gamma_threshold = self.byz_cfg.get("gamma_threshold") # 1e-5 `while |γsucc − γ| > τ do`
+        self.stop_gamma_iter = 1000 #infinite loop breaker
+        self.defense_clsobj = defense_clsobj
+
+        self.vec_state_ignore = ["num_batches_tracked"]
+
+        ## this is global common start point
+        self.gwvec_0th:torch.Tensor = fedops.get_param_from_state(model_at_start.state_dict(),
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+
+        print("ATTACK: MinMaxSumζAttack ; !no Synopsize, so don't compress grads")
+
+
+    def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
+
+        # Loop over benign weights
+        benign_wvec_list = []
+        for kid in omniscience.keys(): # clientwise train info
+            benign_wvec_list.append( fedops.get_param_from_state(
+                    omniscience[kid]["model"].state_dict(),
+                    keys_to_ignore=self.vec_state_ignore).to(self.device) )
+        benign_wvec = torch.vstack(benign_wvec_list)
+
+        gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
+                                    keys_to_ignore=self.vec_state_ignore).to(self.device)
+
+        delta_wvec = gwvec_tminus1 - benign_wvec # ΔW
+        mean_delta_wvec = torch.mean(delta_wvec, dim=0).view(1, -1)
+
+        if self.attk_vec_type == "unit_vec": # ∇ = (ΔW / ∥ΔW∥)
+            attk_devec = mean_delta_wvec / torch.norm(mean_delta_wvec, dim =1)
+        elif self.attk_vec_type == "sign": # ∇ = sign(ΔW)
+            attk_devec = torch.sign(mean_delta_wvec, dim=0)
+        elif self.attk_vec_type == "std": # ∇ = std(ΔW_k)
+            attk_devec = torch.std(delta_wvec, dim=0)
+        else: raise Exception(f"Unknown {self.attk_vec_type}")
+
+
+        ## Attack Vector Optimization ---------
+
+        model_states_for_fed = []
+        maximizer_loss_prev  = -1
+        gamma_curr = self.gamma_scale
+        gamma_step = self.gamma_scale /2
+        gamma_succ = 0
+        cntrv = 0
+        while abs(gamma_succ - gamma_curr) > self.gamma_threshold:
+            if cntrv < self.stop_gamma_iter: cntrv = cntrv + 1
+            else: print(f"** Hit gamma Iter Limit - {cntrv}"); break
+
+            attack_deltawvec = mean_delta_wvec - gamma_curr * attk_devec
+
+            ### Check if attack vec is selected
+
+            # TODO: change the criterion based on ARG-only, AGR-Tailored, AGR-agnostic; current one AGR-tailored
+            attack_wvec = gwvec_tminus1 - attack_deltawvec
+            attack_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth),
+                                        attack_wvec.view(-1),
+                                        keys_to_ignore=self.vec_state_ignore)
+
+            # NOTE: aggr should ideally take synopsised inputs, skipping that for simplicity
+            for kid_ in omniscience.keys():
+                model_states_for_fed.append({"model_state":omniscience[kid_]["model"].state_dict()})
+            model_states_for_fed.append({"model_state":attack_state})
+
+            aggr_state = self.defense_clsobj.aggregate_globally(model_states_for_fed)["model_state"]
+
+            aggr_wvec = fedops.get_param_from_state(aggr_state,
+                                keys_to_ignore=self.vec_state_ignore).to(self.device)
+            aggr_deltawvec = gwvec_tminus1 - aggr_wvec
+
+            # optimise γ
+            maximizer_loss_curr = torch.norm(mean_delta_wvec - aggr_deltawvec, dim=1)
+
+            criterion_succ = maximizer_loss_prev < maximizer_loss_curr
+            if criterion_succ:
+                gamma_succ = gamma_curr
+                gamma_curr = gamma_curr + gamma_step /2
+            else:
+                gamma_curr = gamma_curr - gamma_step /2
+            gamma_step = gamma_step /2
+
+        print("Gamma Success", gamma_succ)
+        ## END - attack vector optimization ---------
+
+        attack_wvec = gwvec_tminus1 - attack_deltawvec
+        out_state = fedops.set_param_in_state(copy.deepcopy(lmodel_state_tth),
+                                    attack_wvec.view(-1),
+                                    keys_to_ignore=self.vec_state_ignore)
         return out_state
