@@ -80,8 +80,8 @@ class FangCraftedζAttack():
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         local_states = []
-        for kid in omniscience.keys(): # clientwise train info
-            local_states.append(omniscience[kid]["model"].state_dict())
+        for kid in omniscience["local_models"].keys(): # clientwise train info
+            local_states.append(omniscience["local_models"][kid]["model"].state_dict())
         benign_state = fedops.global_average_statedict(local_states)
 
         wvec_benign = fedops.get_param_from_state(copy.deepcopy(benign_state),
@@ -133,9 +133,9 @@ class ALIEζAttack():
 
         # Loop over benign weights
         benign_wvec_list = []
-        for kid in omniscience.keys(): # clientwise train info
+        for kid in omniscience["local_models"].keys(): # clientwise train info
             benign_wvec_list.append( fedops.get_param_from_state(
-                    omniscience[kid]["model"].state_dict(),
+                    omniscience["local_models"][kid]["model"].state_dict(),
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
 
@@ -185,9 +185,9 @@ class XieIPMζAttack():
 
         # Loop over benign weights
         benign_wvec_list = []
-        for kid in omniscience.keys(): # clientwise train info
+        for kid in omniscience["local_models"].keys(): # clientwise train info
             benign_wvec_list.append( fedops.get_param_from_state(
-                    omniscience[kid]["model"].state_dict(),
+                    omniscience["local_models"][kid]["model"].state_dict(),
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
 
@@ -265,10 +265,10 @@ class MimicζAttack():
 
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
         good_wvec_list = []
-        for kid in omniscience.keys(): # clientwise train info
+        for kid in omniscience["local_models"].keys(): # clientwise train info
             if kid in self.honest_ranks:
                 good_wvec_list.append( fedops.get_param_from_state(
-                        omniscience[kid]["model"].state_dict(),
+                        omniscience["local_models"][kid]["model"].state_dict(),
                         keys_to_ignore=self.vec_state_ignore).to(self.device) )
         stacked_good_wvec = torch.vstack(good_wvec_list)
 
@@ -325,8 +325,8 @@ class OzfaturaROPζAttack():
     def modify(self, lmodel_state_tth, gmodel_state_tminus1, omniscience={}):
 
         local_states = []
-        for kid in omniscience.keys(): # clientwise train info
-            local_states.append(omniscience[kid]["model"].state_dict())
+        for kid in omniscience["local_models"].keys(): # clientwise train info
+            local_states.append(omniscience["local_models"][kid]["model"].state_dict())
         benign_state = fedops.global_average_statedict(local_states)
         benign_wvec = fedops.get_param_from_state(copy.deepcopy(benign_state),
                                     keys_to_ignore=self.vec_state_ignore).to(self.device)
@@ -405,6 +405,7 @@ class MinMaxSumζAttack():
         self.gamma_scale = self.byz_cfg.get("gamma_start") #10
         self.gamma_threshold = self.byz_cfg.get("gamma_threshold") # 1e-5 `while |γsucc − γ| > τ do`
         self.stop_gamma_iter = 1000 #infinite loop breaker
+
         self.defense_clsobj = defense_clsobj
 
         self.vec_state_ignore = ["num_batches_tracked"]
@@ -420,11 +421,14 @@ class MinMaxSumζAttack():
 
         # Loop over benign weights
         benign_wvec_list = []
-        for kid in omniscience.keys(): # clientwise train info
+        for kid in omniscience["local_models"].keys(): # clientwise train info
             benign_wvec_list.append( fedops.get_param_from_state(
-                    omniscience[kid]["model"].state_dict(),
+                    omniscience["local_models"][kid]["model"].state_dict(),
                     keys_to_ignore=self.vec_state_ignore).to(self.device) )
         benign_wvec = torch.vstack(benign_wvec_list)
+
+        del self.defense_clsobj
+        self.defense_clsobj = omniscience["global_server_obj"]
 
         gwvec_tminus1 = fedops.get_param_from_state(gmodel_state_tminus1,
                                     keys_to_ignore=self.vec_state_ignore).to(self.device)
@@ -464,8 +468,8 @@ class MinMaxSumζAttack():
                                         keys_to_ignore=self.vec_state_ignore)
 
             # NOTE: aggr should ideally take synopsised inputs, skipping that for simplicity
-            for kid_ in omniscience.keys():
-                model_states_for_fed.append({"model_state":omniscience[kid_]["model"].state_dict()})
+            for kid_ in omniscience["local_models"].keys():
+                model_states_for_fed.append({"model_state":omniscience["local_models"][kid_]["model"].state_dict()})
             model_states_for_fed.append({"model_state":attack_state})
 
             aggr_state = self.defense_clsobj.aggregate_globally(model_states_for_fed)["model_state"]
@@ -476,11 +480,14 @@ class MinMaxSumζAttack():
 
             # optimise γ
             maximizer_loss_curr = torch.norm(mean_delta_wvec - aggr_deltawvec, dim=1)
+            print("mxr_loss", maximizer_loss_curr)
+            print("gammas diff", gamma_succ - gamma_curr)
 
             criterion_succ = maximizer_loss_prev < maximizer_loss_curr
             if criterion_succ:
                 gamma_succ = gamma_curr
                 gamma_curr = gamma_curr + gamma_step /2
+                maximizer_loss_prev = maximizer_loss_curr
             else:
                 gamma_curr = gamma_curr - gamma_step /2
             gamma_step = gamma_step /2

@@ -575,7 +575,10 @@ def simple_main(model_key=None, folder_suffix=""):
         # modified synopsis for Omniscient attack
         for id in  traindozers.keys():
             syn_in = local_train_returns[id]
-            syn_in["omniscience"] = local_train_returns
+            syn_in["omniscience"]= {}
+            syn_in["omniscience"]["local_models"] = local_train_returns
+            ## NOTE: WARN check for bugs in deepcopy of the class
+            syn_in["omniscience"]["global_server_obj"] = copy.deepcopy(global_fedprtcl)
             local_xcerpt_for_fed.append(
                 fed_locals[id].fedprtcl.synopsize_local(syn_in)  )
 

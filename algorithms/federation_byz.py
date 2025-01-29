@@ -98,6 +98,8 @@ class NoGuardΞByzantine():
             self.byz_way = get_attack_clsobj(self.byztn_cfg["byztn_method"])(
                 self.cfg, self.gmodel_init, defense_clsobj = self, device=self.device)
 
+    def init_stacked_wvecs(self, model):
+        pass
 
     #-------- Client methods ----------
 
