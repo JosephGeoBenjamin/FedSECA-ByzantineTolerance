@@ -2,7 +2,7 @@
     "byztn_cfg":{
         "byztn_clients": [3,4],
         "byztn_method" : "MinMaxSumζAttack",
-        "attack_vector_type": "unit_vec",
+        "attack_vector_type": "sign",
         "gamma_start"       : 10,
         "gamma_threshold"   : 1e-5
 

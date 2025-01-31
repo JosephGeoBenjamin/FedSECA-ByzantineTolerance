@@ -1078,16 +1078,18 @@ class FLDetectorΞByzantine(NoGuardΞByzantine):
 
 
         ## FedAVG on selected clients
-        mean_dwvec = stacked_deltawvec.sum(dim=0) / nonmalicious_size
+        # raggr_dwvec = stacked_deltawvec.sum(dim=0) / nonmalicious_size
+        ## Fed Median on sleted clients
+        raggr_dwvec, _ = torch.median(stacked_deltawvec, dim=0)
 
-        new_wvec = self.aggwvec_tminus1 - mean_dwvec
+        new_wvec = self.aggwvec_tminus1 - raggr_dwvec
         agg_state = fedops.set_param_in_state(state_dict_struct, new_wvec,
                                                keys_to_ignore=self.vec_state_ignore)
 
-        self.model_diffs.append(mean_dwvec.clone())
-        self.update_diffs.append(self.aggdeltavec_tminus1 - mean_dwvec)
+        self.model_diffs.append(raggr_dwvec.clone())
+        self.update_diffs.append(self.aggdeltavec_tminus1 - raggr_dwvec)
 
-        self.aggdeltavec_tminus1 = mean_dwvec.clone()
+        self.aggdeltavec_tminus1 = raggr_dwvec.clone()
         self.aggwvec_tminus1 = new_wvec.clone()
 
         if len(self.model_diffs) > self.window_n: del self.model_diffs[0]

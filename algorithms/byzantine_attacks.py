@@ -439,7 +439,7 @@ class MinMaxSumζAttack():
         if self.attk_vec_type == "unit_vec": # ∇ = (ΔW / ∥ΔW∥)
             attk_devec = mean_delta_wvec / torch.norm(mean_delta_wvec, dim =1)
         elif self.attk_vec_type == "sign": # ∇ = sign(ΔW)
-            attk_devec = torch.sign(mean_delta_wvec, dim=0)
+            attk_devec = torch.sign(mean_delta_wvec)
         elif self.attk_vec_type == "std": # ∇ = std(ΔW_k)
             attk_devec = torch.std(delta_wvec, dim=0)
         else: raise Exception(f"Unknown {self.attk_vec_type}")
@@ -487,12 +487,13 @@ class MinMaxSumζAttack():
             if criterion_succ:
                 gamma_succ = gamma_curr
                 gamma_curr = gamma_curr + gamma_step /2
-                maximizer_loss_prev = maximizer_loss_curr
             else:
                 gamma_curr = gamma_curr - gamma_step /2
             gamma_step = gamma_step /2
+            maximizer_loss_prev = maximizer_loss_curr
 
-        print("Gamma Success", gamma_succ)
+            print("Gamma Success", gamma_succ, ", Steps Taken", cntrv)
+
         ## END - attack vector optimization ---------
 
         attack_wvec = gwvec_tminus1 - attack_deltawvec
