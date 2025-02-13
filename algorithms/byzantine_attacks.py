@@ -447,13 +447,14 @@ class MinMaxSumζAttack():
 
         ## Attack Vector Optimization ---------
 
-        model_states_for_fed = []
         maximizer_loss_prev  = -1
         gamma_curr = self.gamma_scale
         gamma_step = self.gamma_scale /2
         gamma_succ = 0
         cntrv = 0
         while abs(gamma_succ - gamma_curr) > self.gamma_threshold:
+            model_states_for_fed = []
+
             if cntrv < self.stop_gamma_iter: cntrv = cntrv + 1
             else: print(f"** Hit gamma Iter Limit - {cntrv}"); break
 
@@ -470,7 +471,7 @@ class MinMaxSumζAttack():
             # NOTE: aggr should ideally take synopsised inputs, skipping that for simplicity
             for kid_ in omniscience["local_models"].keys():
                 model_states_for_fed.append({"model_state":omniscience["local_models"][kid_]["model"].state_dict()})
-            model_states_for_fed.append({"model_state":attack_state})
+            model_states_for_fed[omniscience["self_K_id"]] = {"model_state":attack_state}
 
             aggr_state = self.defense_clsobj.aggregate_globally(model_states_for_fed)["model_state"]
 

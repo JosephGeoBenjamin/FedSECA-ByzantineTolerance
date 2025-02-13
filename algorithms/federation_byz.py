@@ -113,9 +113,11 @@ class NoGuardΞByzantine():
 
         if self.byz_way:
             with torch.no_grad():
+                omniinfo = zxs["omniscience"]
+                omniinfo["self_K_id"] = self.id # ID for bookkeeping for cahooting
                 out_state = self.byz_way.modify(model.state_dict(),
                                             self.gmodel_tminus1.state_dict(),
-                                            omniscience=zxs["omniscience"])
+                                            omniscience=omniinfo)
         else:
             out_state = model.state_dict()
 
