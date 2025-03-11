@@ -14,7 +14,7 @@ SEED=73
 SAVEROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/REBUTE-ATTK/isic-cnvxt-im/
 EXP_JSON=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/automaton/isic19-cnvxt.json
 
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=6
 
 ##==============================================================================
 
@@ -24,10 +24,12 @@ DFEN_ROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/au
 # ATTACKS=("no_attack" "alie" "fang" "ipm" "labelflip" "mimic" "scale" "minmaxsum") #"rop"
 ATTACKS=( "minmaxsum") #"rop"
 
-DEFENCES=("no_defense" "krum" "copod" "cwtm" "geomrfa"
-          "clipping" "cc_randbuck" "cc_seqbuck" "ties_merge"
-          "fedrise_v2"
-          "huberlossmin" "norm_grad_agg" "fldetector")
+# DEFENCES=("no_defense" "krum" "copod" "cwtm" "geomrfa"
+#           "clipping" "cc_randbuck" "cc_seqbuck" "ties_merge"
+#           "fedrise_v2"
+#           "huberlossmin" "norm_grad_agg" "fldetector")
+
+DEFENCES=("fldetector")
 
 # Loop through each directory and append it to the root directory
 for atknm in "${ATTACKS[@]}"; do

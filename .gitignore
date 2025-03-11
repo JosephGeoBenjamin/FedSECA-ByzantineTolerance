@@ -2,13 +2,13 @@
 __pycache__
 *.ipynb
 
-configs/*
+configs/automaton/ablate-fedrise/*
 auto-scripts/*
 weights/*
 hypothes*
 data
 */data/*
-todo.txt
+todo*
 temp*
 !README.md
 !readme.md

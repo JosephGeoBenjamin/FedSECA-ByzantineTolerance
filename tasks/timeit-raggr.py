@@ -83,7 +83,7 @@ all_defns_json = json.load(open("/home/ibrahim.almakky/joseph/wacv25/main-frame/
                             'rt'))["DEFENSE_METHODS"]
 
 
-for dcc in [4, 8, 512, 1024, 2048, 4096]:
+for dcc in [4, 8, 16, 32, 64, 128]:
     CFG.data_centers_count = dcc
 
     ## ---- Create Empty Weights

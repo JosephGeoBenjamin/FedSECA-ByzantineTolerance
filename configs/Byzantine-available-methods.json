@@ -108,7 +108,17 @@
     },
 
     {
-        "defense_method" : "FedNGAΞByzantine"
+        "defense_method" : "FLDetectorΞByzantine",
+        "history_window" : 10,
+        "aggregator_method" : "fedavg"
+    },
+
+    {
+        "defense_method"    : "HuberLossWeiszfeldΞByzantine",
+        "stability_nu"      : 1e-6,
+        "max_iter_r"        : 100,
+        "tolerance_iter_tau": 0.001,
+        "huberloss_thresh_t": 0.02
     },
 
     {

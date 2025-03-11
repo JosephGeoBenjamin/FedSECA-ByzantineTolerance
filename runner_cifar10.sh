@@ -11,24 +11,24 @@ COMMANDBASE="python tasks/cls-fedbase-train.py"
 #-------------------------------------------------------------------------------
 
 SEED=73
-SAVEROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/REBUTE-ATTK/cifar10-rand/
+SAVEROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/REBUTE/cifar10-rand/
 EXP_JSON=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/automaton/cifar10-rand.json
 
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=6
 
 ##==============================================================================
 
 ATTK_ROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/automaton/attacks/
 DFEN_ROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/automaton/defense/
 
-# ATTACKS=("no_attack" "alie" "fang" "ipm" "labelflip" "mimic" "scale") #"rop"
-ATTACKS=("minmaxsum") #"rop"
+# ATTACKS=("no_attack" "alie" "fang" "ipm" "labelflip" "mimic" "scale" "minmaxsum") #"rop"
+ATTACKS=("alie") #"rop"
 
-DEFENCES=("copod" "no_defense" "krum" "cwtm" "geomrfa"
-          "clipping" "cc_randbuck" "cc_seqbuck" "ties_merge"
-          "fedrise_v2"
-          "huberlossmin" "norm_grad_agg" "fldetector")
-
+# DEFENCES=("copod" "no_defense" "krum" "cwtm" "geomrfa"
+#           "clipping" "cc_randbuck" "cc_seqbuck" "ties_merge"
+#           "fedrise_v2"
+#           "huberlossmin" "norm_grad_agg" "fldetector")
+DEFENCES=("fldetector")
 
 # Loop through each directory and append it to the root directory
 for atknm in "${ATTACKS[@]}"; do

@@ -904,6 +904,8 @@ class FLDetectorΞByzantine(NoGuardΞByzantine):
 
         self.window_n = int(self.defense_cfg.get("history_window")) # N in paper
         self.aggr_method = self.defense_cfg.get("aggregator_method")
+
+        ## Median implementation overrided in function __byzants_detector
         assert self.aggr_method == "fedavg", f"Expected 'fedavg' but got '{self.aggr_method}'"
 
         self.aggregator_func = self.__byzants_detector
@@ -965,7 +967,12 @@ class FLDetectorΞByzantine(NoGuardΞByzantine):
         lower_mat = torch.cat([L_t.t(), -torch.diag(D_t_diag)], dim=1)  # [WN, 2WN]
 
         mat = torch.cat([upper_mat, lower_mat], dim=0)  # [2WN, 2WN]
-        mat_inv = torch.linalg.inv(mat)  # [2WN, 2WN]
+
+        try:
+            mat_inv = torch.linalg.inv(mat)  # [2WN, 2WN]
+        except:
+            print("switching to P-Inverse ....")
+            mat_inv = torch.linalg.pinv(mat)  # [2WN, 2WN]
 
         approx_prod = sigma_k * stacked_dV # [D x K]
 

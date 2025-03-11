@@ -14,7 +14,7 @@ SEED=73
 SAVEROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/REBUTE-ATTK/eurosat-deit-imnet/
 EXP_JSON=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/automaton/euros-deit-imnet.json
 
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=5
 
 ##==============================================================================
 
@@ -24,11 +24,11 @@ DFEN_ROOT=/home/joseph.benjamin/WERK/fed-cvpr/thesis_hypes/main-frame/configs/au
 # ATTACKS=("no_attack" "alie" "fang" "ipm" "labelflip" "mimic" "scale" "minmaxsum") #"rop"
 ATTACKS=("minmaxsum") #"rop"
 
-DEFENCES=("no_defense" "krum" "copod" "cwtm" "geomrfa"
-          "clipping" "cc_randbuck" "cc_seqbuck" "ties_merge"
-          "fedrise_v2"
-          "huberlossmin" "norm_grad_agg" "fldetector")
-
+# DEFENCES=("no_defense" "krum" "copod" "cwtm" "geomrfa"
+#           "clipping" "cc_randbuck" "cc_seqbuck" "ties_merge"
+#           "fedrise_v2"
+#           "huberlossmin" "norm_grad_agg" "fldetector")
+DEFENCES=("fldetector")
 
 # Loop through each directory and append it to the root directory
 for atknm in "${ATTACKS[@]}"; do
