@@ -1,6 +1,7 @@
 # FedSECA
 Offical Implementation of Paper "**FedSECA: Sign Election and Coordinate-wise Aggregation of Gradients
 for Byzantine Tolerant Federated Learning**"
+[[Arxiv](https://arxiv.org/abs/2411.03861)]
 
 **Authors:** Joseph Geo Benjamin, Mothilal Asokan, Mohammad Yaqub, Karthik Nandakumar.
 
@@ -12,7 +13,7 @@ for Byzantine Tolerant Federated Learning**"
 
 ## Code base
 
-With all possible abuse of SW-dev practices, the code is intentionally kept simple to ensure easier understanding, maintainability, and reduce the likelihood unintended behavior.
+With all possible abuse of SW-dev practices, the code is intentionally kept reseach friendly rather than production grade, to ensure easier understanding, maintainability, and reduce the likelihood unintended behavior.
 
 Current code base is intended for evaluating Cross-Silo use case. Same Global model is broadcasted to all clients after agregation is used for evaluation, not intended for personalization/fairness approaches that sends different models for each clients.
 
@@ -50,7 +51,13 @@ AND/OR
 If you find our work on Byzantine Tolerance insightful for your research, consider citing us:
 
 ```
-
+@inproceedings{benjamin2025fedseca,
+  title={FedSECA: Sign Election and Coordinate-wise Aggregation of Gradients for Byzantine Tolerant Federated Learning},
+  author={Benjamin, Joseph Geo and Asokan, Mothilal and Yaqub, Mohammad and Nandakumar, Karthik},
+  booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
+  pages={1771--1780},
+  year={2025}
+}
 ```
 
 
